@@ -497,9 +497,12 @@ rule standalone and in decision-list order, by ply.
     L4's control's 130,061 (0.84; the registered bar was 0.80). Smaller on 24 of 32 (sign test p = 0.003); 28% fewer
     levelled cells, 22% fewer map bits; the heaviest 16 at 0.80. Next: the user's choice (e.g. carry L5 into the whole
     frontier, or stack another rule on it).
-  - **Decided (user, 2026-10-17): rebuild the whole game with L5.** F2 (h288, h289; running since 07:17Z): F1 with
-    only the rule changed, judged on completion and on the whole strategy against F1's 548,424 bits (nine tenths
-    supports). ~2-3 days on 4 workers; resumable (`--resume`, run files in checkpoints/runs/c49_f2*).
+  - **F2 result (h288, h289 supported — pre-registered; h290 after the data): the whole game in 455,959 bits.**
+    F1 with L5's rule: every position complete; 0.83 of F1's 548,424 (maps −24%, exceptions −21%; F1's heaviest 67 at
+    0.72). The heavy tail still holds 57% of the bits. ~11x WeakC4's ~40K.
+  - **B1 (h291, h292; running since 2026-10-19 22:31Z, user's choice: longer searches on the heavy tail):** L5's rule,
+    deeper leaf searches 120 s instead of 30 s, on F2's 16 heaviest positions, against a 30-s control run after;
+    no library. ~8 h per arm. Run files in checkpoints/runs/c49_b1*.
 
 ## 4. The hybrid process — definition of done
 

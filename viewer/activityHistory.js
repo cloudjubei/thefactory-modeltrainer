@@ -1,7 +1,7 @@
 // Pure ACTIVITY-HISTORY presentation logic — reduce the raw `listActivities` result to the SETTLED
 // (completed/failed/aborted) activities of the current project, newest-finished first, as display rows with a
 // duration + a status class. The live/queued/paused activities render in the Activity tab; this is the
-// browsable HISTORY the popup shows. Pure + dual-loaded (browser `window.ActivityHistory` + node
+// browsable HISTORY the popup shows. Also says what the person's Stop / Discard observed (`stopOutcomeNote`). Pure + dual-loaded (browser `window.ActivityHistory` + node
 // `module.exports`) so the ACTUAL logic is unit-tested directly (see src/activityHistoryViewer.test.ts).
 ;(function (root) {
   'use strict'
@@ -88,7 +88,51 @@
     return out
   }
 
+  // What the person's stop observed, in one line: only `stopped` reads as done, and what it started is counted
+  // with it. A stop the bridge gave up waiting on is still being carried out by the host; any other failure
+  // says why.
+  function stopOutcomeNote(result, error) {
+    if (error && !/timeout/i.test(error)) return { tone: 'warn', text: 'Couldn’t stop it — ' + error }
+    if (!result || typeof result.outcome !== 'string') {
+      return { tone: 'warn', text: 'Still stopping — refresh to see where it stands' }
+    }
+    var status = result.status || 'unknown'
+    var main =
+      result.outcome === 'stopped'
+        ? { tone: 'ok', text: 'Stopped' }
+        : result.outcome === 'noop'
+          ? { tone: 'muted', text: 'Already ' + status + ' — nothing changed' }
+          : result.outcome === 'not-stopped'
+            ? { tone: 'warn', text: 'Not stopped — it is ' + status }
+            : result.outcome === 'failed'
+              ? { tone: 'warn', text: 'Couldn’t confirm it stopped — it may still be running' }
+              : { tone: 'warn', text: 'Not stopped — ' + (result.code || 'refused') }
+    var children = Array.isArray(result.children) ? result.children : []
+    if (!children.length) return main
+    var unsure = children.filter(function (c) {
+      return c.outcome === 'failed' || c.outcome === 'refused'
+    }).length
+    if (!unsure) {
+      var stopped = children.filter(function (c) {
+        return c.outcome === 'stopped'
+      }).length
+      return { tone: main.tone, text: main.text + ' · also stopped ' + stopped + ' it started' }
+    }
+    return {
+      tone: 'warn',
+      text: main.text + ' · ' + unsure + ' of ' + children.length + ' it started may still be running',
+    }
+  }
+
+  // Whether a stop left its activity ended (stopped, or it had already finished) — so a paused entry can go.
+  function stopEnded(result) {
+    var o = result && result.outcome
+    return o === 'stopped' || o === 'noop' || o === 'not-stopped'
+  }
+
   var api = {
+    stopOutcomeNote: stopOutcomeNote,
+    stopEnded: stopEnded,
     historyRows: historyRows,
     formatDuration: formatDuration,
     statusClass: statusClass,

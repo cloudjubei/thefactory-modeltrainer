@@ -5,6 +5,7 @@
 // app falls back to localStorage.
 ;(function () {
   const PREFIX = 'overseer:'
+  const STOP_TIMEOUT_MS = 11 * 60 * 1000
   const pending = new Map()
   let seq = 0
   // Handler for host->app PUSH messages the host sends UNSOLICITED (no id). Currently just `nav.open`.
@@ -92,6 +93,15 @@
     // set, whose serialization can exceed 8s (an under-tight timeout rejects and looks like "no history").
     listActivities: (timeoutMs) => call('activities.list', undefined, timeoutMs),
     abortActivity: (activityId) => call('activities.abort', { activityId: activityId }),
+    // The person's own Stop / Discard, confirmed in the app first: ends the activity, and what it started, for
+    // good (Pause is abortActivity). The host awaits the teardown, so this waits well past the default guard.
+    // Returns what the host observed: { activityId, outcome, code?, status?, children? }.
+    stopActivity: (activityId, reason) =>
+      call(
+        'activities.stop',
+        reason ? { activityId: activityId, reason: reason } : { activityId: activityId },
+        STOP_TIMEOUT_MS,
+      ),
     // Resume a run that's no longer live (e.g. orphaned by a server restart).
     // No-op if it's still genuinely running. Returns { activityId }.
     resumeActivity: (activityId) => call('activities.resume', { activityId: activityId }, 30000),

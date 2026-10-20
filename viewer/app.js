@@ -84,6 +84,10 @@ const PAUSED_IDS_SS = 'trainer.pausedActivities'
 // The campaign currently showing the inline "kill the process?" pause confirmation (survives the
 // activity block's frequent re-renders, since it lives here, not in the DOM).
 let pausePromptId = null
+// The activity currently showing the inline "stop it for good?" confirmation before an Abort, a Discard or a
+// queue removal, and the ones whose stop the host is still carrying out (both survive re-renders).
+let stopPromptId = null
+const stoppingIds = new Set()
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
@@ -2794,9 +2798,10 @@ function queuedEntriesInOrder() {
     .filter((e) => e.status === 'queued')
     .sort((a, b) => pos(a.activityId) - pos(b.activityId) || a.startedAt - b.startedAt)
 }
-// Remove a queued activity = abort it (the host drops it from the queue).
+// Remove a queued activity (or discard a paused one) = stop it for good — asked in its row first.
 async function onQueueRemove(activityId) {
-  await abortActivityById(activityId)
+  stopPromptId = activityId
+  renderActivity()
 }
 // Reorder a queued activity within its OWN lane. Rebuilds `queueOrder` (this lane's new order + the
 // other lane's order preserved) and persists it — the host drain reads the record on the next tick.
@@ -3787,6 +3792,8 @@ async function championActivityRunning() {
 // space, then improves the champion, stopping when nothing's left. This is the primary control of the tab;
 // the champion "Improve" panel + the advanced search below it are the manual overrides it drives.
 let autopilotLaunching = false
+// "Find the best model"'s Stop was pressed once: the panel asks before stopping it for good.
+let autopilotStopConfirm = false
 // The autopilot's live step ('screen'|'search'|'improve'|'done'|null) — drives the STEP-ADAPTIVE view: the
 // config-space heatmap auto-opens while 'search'; the champion ladder already surfaces its own running state.
 let autopilotStep = null
@@ -3946,9 +3953,12 @@ async function renderAutopilotPanel() {
   // When running, offer a STOP that aborts the WHOLE process — every live activity it drives (parent autopilot +
   // any wedged child), since cancelling child experiments alone can leave the panel stuck on "Running…".
   const stopIds = running ? await liveAutopilotActivityIds() : []
-  const stopBtn = stopIds.length
-    ? `<button type="button" class="ghost-btn" id="autopilot-stop"${helpAttr('Stop “Find the best model” — aborts the running autopilot and every step it is running.')}>Stop</button>`
-    : ''
+  if (!stopIds.length) autopilotStopConfirm = false
+  const stopBtn = !stopIds.length
+    ? ''
+    : autopilotStopConfirm
+      ? `<span class="card-sub">Stop it for good? Every step it is running stops too.</span><button type="button" class="danger-btn" id="autopilot-stop-confirm">Stop</button><button type="button" class="ghost-btn" id="autopilot-stop-cancel">Cancel</button>`
+      : `<button type="button" class="ghost-btn" id="autopilot-stop"${helpAttr('Stop “Find the best model” — ends the running autopilot and every step it is running, for good.')}>Stop</button>`
   host.innerHTML =
     `<div class="ap-panel">` +
     `<div class="ap-head">Find the best model</div>` +
@@ -3960,15 +3970,25 @@ async function renderAutopilotPanel() {
   const sBtn = byId('autopilot-stop')
   if (sBtn)
     sBtn.onclick = async () => {
-      sBtn.disabled = true
+      autopilotStopConfirm = true
+      await renderAutopilotPanel()
+    }
+  const cancelBtn = byId('autopilot-stop-cancel')
+  if (cancelBtn)
+    cancelBtn.onclick = async () => {
+      autopilotStopConfirm = false
+      await renderAutopilotPanel()
+    }
+  const confirmBtn = byId('autopilot-stop-confirm')
+  if (confirmBtn)
+    confirmBtn.onclick = async () => {
+      autopilotStopConfirm = false
+      confirmBtn.disabled = true
       showToast('Stopping…')
-      for (const id of stopIds) {
-        try {
-          await abortActivityById(id)
-        } catch {
-          /* best-effort: abort as many as we can */
-        }
-      }
+      const notes = []
+      for (const id of stopIds) notes.push(await stopActivityById(id, { quiet: true }))
+      const said = notes.find((n) => n && n.tone === 'warn') || notes.find((n) => n && n.tone === 'ok')
+      showToast(said ? said.text : 'Stopped')
       invalidateActivitiesCache()
       await renderAutopilotPanel()
     }
@@ -20381,18 +20401,27 @@ async function pauseActivityById(activityId) {
     // best-effort — the entry stays paused (user-marked) regardless
   }
 }
-// Abort ONE activity by id — the observe loop's next poll sees 'aborted' and settles it.
-async function abortActivityById(activityId) {
-  if (!activityId) return
-  setPausedByUser(activityId, false)
-  const btn = document.querySelector(`[data-abort="${escapeHtml(activityId)}"]`)
-  if (btn) btn.disabled = true
+// STOP ONE activity for good — the person's Abort / Discard / queue removal, confirmed in the app first. Goes
+// through the host's activities.stop, which ends it and what it started and awaits the teardown (Pause stays
+// on the resumable abort). Says what the stop observed, unless `quiet`, and answers that note.
+async function stopActivityById(activityId, opts) {
+  if (!activityId) return undefined
+  stopPromptId = null
+  stoppingIds.add(activityId)
+  renderActivity()
+  let result, error
   try {
-    await window.OverseerBridge.abortActivity(activityId)
+    result = await window.OverseerBridge.stopActivity(activityId)
     invalidateActivitiesCache()
-  } catch {
-    if (btn) btn.disabled = false
+  } catch (err) {
+    error = (err && err.message) || String(err)
   }
+  stoppingIds.delete(activityId)
+  const note = window.ActivityHistory.stopOutcomeNote(result, error)
+  if (!(opts && opts.quiet)) showToast(note.text)
+  renderActivity()
+  if (!window.ActivityHistory.stopEnded(result)) return note
+  setPausedByUser(activityId, false)
   // A stalled (paused, not-observed) entry has no observe loop to settle it — drop it here so the
   // discarded campaign disappears. A live (running) entry is left for its observe loop to settle.
   let droppedPaused = false
@@ -20406,6 +20435,11 @@ async function abortActivityById(activityId) {
     renderActivity()
     pumpQueue()
   }
+  return note
+}
+// The inline confirmation an Abort / Discard asks before stopping one activity for good.
+function stopConfirmHtml(id, question, verb) {
+  return `<div class="form-actions activity-confirm"><span class="card-sub">${escapeHtml(question)}</span><button type="button" class="danger-btn" data-stop-confirm="${id}">${escapeHtml(verb)}</button><button type="button" class="ghost-btn" data-stop-cancel="${id}">Cancel</button></div>`
 }
 // Resume ONE paused activity by id — re-fire its observe loop.
 async function resumeActivityById(activityId) {
@@ -20588,6 +20622,20 @@ function queueSectionHtml(entries, title) {
     .map((entry) => {
       const id = escapeHtml(entry.activityId)
       const label = escapeHtml(entry.label || activityTypeLabel(entry.activityType))
+      if (stoppingIds.has(entry.activityId)) {
+        return `<li class="queue-item">
+      <span class="queue-label">${label}</span>
+      <button type="button" disabled>Stopping…</button>
+    </li>`
+      }
+      if (stopPromptId === entry.activityId) {
+        const paused = entry.status === 'paused'
+        return `<li class="queue-item">
+      <span class="queue-label">${paused ? `Discard ${label} for good? It won’t resume.` : `Remove ${label} from the queue for good?`}</span>
+      <button type="button" class="danger-btn" data-stop-confirm="${id}">${paused ? 'Discard' : 'Remove'}</button>
+      <button type="button" class="ghost-btn" data-stop-cancel="${id}">Cancel</button>
+    </li>`
+      }
       if (entry.status === 'paused') {
         return `<li class="queue-item">
       <span class="badge queue-chip is-warn">Paused</span>
@@ -20668,11 +20716,19 @@ function activityBlockHtml(entry) {
         pausePromptId === entry.activityId
           ? `<div class="form-actions activity-confirm"><span class="card-sub">Kill the running process and pause? It will resume from the last completed run.</span><button type="button" class="danger-btn" data-pause-confirm="${id}">Pause</button><button type="button" class="ghost-btn" data-pause-cancel="${id}">Cancel</button></div>`
           : `<div class="form-actions"><button type="button" data-pause="${id}">Pause</button></div>`
+    } else if (stoppingIds.has(entry.activityId)) {
+      actions = '<div class="form-actions"><button type="button" disabled>Stopping…</button></div>'
+    } else if (stopPromptId === entry.activityId) {
+      actions = stopConfirmHtml(id, 'Stop it for good? What it started stops too.', 'Stop')
     } else {
       actions = `<div class="form-actions"><button type="button" class="danger-btn" data-abort="${id}">Abort</button></div>`
     }
   } else if (status === 'paused' && entry.activityId) {
-    actions = `<div class="form-actions"><button type="button" data-resume="${id}">Resume</button><button type="button" class="ghost-btn" data-abort="${id}">Discard</button></div>`
+    actions = stoppingIds.has(entry.activityId)
+      ? '<div class="form-actions"><button type="button" disabled>Stopping…</button></div>'
+      : stopPromptId === entry.activityId
+        ? stopConfirmHtml(id, 'Discard it for good? It won’t resume; completed runs are kept.', 'Discard')
+        : `<div class="form-actions"><button type="button" data-resume="${id}">Resume</button><button type="button" class="ghost-btn" data-abort="${id}">Discard</button></div>`
   }
   const stalledNote =
     status === 'paused' && isTrain
@@ -20959,7 +21015,19 @@ function setupActivity() {
     }
     const abortBtn = event.target.closest('button[data-abort]')
     if (abortBtn) {
-      abortActivityById(abortBtn.dataset.abort)
+      stopPromptId = abortBtn.dataset.abort
+      renderActivity()
+      return
+    }
+    const stopConfirmBtn = event.target.closest('button[data-stop-confirm]')
+    if (stopConfirmBtn) {
+      stopActivityById(stopConfirmBtn.dataset.stopConfirm)
+      return
+    }
+    const stopCancelBtn = event.target.closest('button[data-stop-cancel]')
+    if (stopCancelBtn) {
+      stopPromptId = null
+      renderActivity()
       return
     }
     const resumeBtn = event.target.closest('button[data-resume]')
@@ -21030,6 +21098,8 @@ let diagnosisRenderedRt = null
 // second trigger while one is in flight would pile up and the spinner would never settle. Drop overlapping calls.
 let diagnosisRendering = false
 let explorationRendering = false
+// The exploration's Stop was pressed once: its controls ask before stopping the search for good.
+let explorationStopConfirm = false
 // Last-computed diagnosis, reused when nothing it depends on changed — { recordsRef, settestLen, analysis } —
 // so re-entering the Diagnosis tab paints instantly instead of re-analysing ~20k runs every time. `recordsRef`
 // is the loadRawCorpus result identity (advanced on new runs / reset on project switch), so it self-invalidates.
@@ -21370,23 +21440,31 @@ async function renderExploration(fromPoll) {
       await launchExplore(extra)
     },
     onAbort: async () => {
-      // Stop the controller AND the in-flight child it launched — aborting only the controller leaves the
-      // child queued/running, which is exactly the "Stop doesn't clear the queue" trap. The child id is
-      // tracked on the persisted map so we abort EXACTLY it, then clear the handle so a later Resume/Start
-      // begins clean instead of re-adopting a dead run.
-      if (activity && activity.activityId) {
+      explorationStopConfirm = true
+      renderExploration()
+    },
+    onAbortCancel: async () => {
+      explorationStopConfirm = false
+      renderExploration()
+    },
+    onAbortConfirm: async () => {
+      // Stop the controller for good through the host's stop, which ends what it started with it. The in-flight
+      // child is stopped by id too, for a child started before the host recorded who started it. The child id is
+      // tracked on the persisted map; the handle is then cleared so a later Start begins clean instead of
+      // re-adopting a dead run.
+      explorationStopConfirm = false
+      const results = []
+      for (const id of [activity && activity.activityId, state && state.pendingChildId]) {
+        if (!id) continue
         try {
-          await window.OverseerBridge.abortActivity(activity.activityId)
-        } catch {
-          // ignore
+          results.push(await window.OverseerBridge.stopActivity(id))
+        } catch (err) {
+          results.push({ error: (err && err.message) || String(err) })
         }
       }
-      if (state && state.pendingChildId) {
-        try {
-          await window.OverseerBridge.abortActivity(state.pendingChildId)
-        } catch {
-          // ignore
-        }
+      if (results.length) {
+        const first = results[0]
+        showToast(window.ActivityHistory.stopOutcomeNote(first.error ? undefined : first, first.error).text)
       }
       // Clear the in-flight handle AND the paused flag: Stopping after a Pause must NOT leave the map paused
       // (it would keep showing "Paused" with a Resume button over a stopped search).
@@ -21491,6 +21569,7 @@ async function renderExploration(fromPoll) {
       runs,
       totalRuns: runs.length,
       launching,
+      confirmingStop: explorationStopConfirm,
       activity: activity ? { status: activity.status } : null,
       pendingChild,
       childProgress: pendingChild && pendingChild.total ? { done: pendingChild.done, total: pendingChild.total } : null,

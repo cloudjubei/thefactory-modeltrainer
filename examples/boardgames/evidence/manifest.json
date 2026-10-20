@@ -364,6 +364,10 @@
       "sha256": "529655c22d06b6f896a3f191acbd6ed91627c63a9e7d1a5e98353385610b8415",
       "started": "2026-10-10T06:40:15+00:00"
     },
+    "c49_b1.json.gz": {
+      "sha256": "02c27b884ce22c77e18bb4bfb1399775580e9e0d6f8a1075958acb164fa89155",
+      "started": "2026-10-19T22:31:34+00:00"
+    },
     "c49_build_profile.json.gz": {
       "sha256": "a637ac4a5151ad1a5e31a4455aab27a2d03b14518b5c117a3828db8e9efd6334",
       "started": "2026-10-08T09:48:47+00:00"
@@ -391,6 +395,10 @@
     "c49_f1.json.gz": {
       "sha256": "2f897524b023dd80c7b54be2235b4e0cd93a283f43019bbf01f99c546cf87683",
       "started": "2026-10-13T22:20:39+00:00"
+    },
+    "c49_f2.json.gz": {
+      "sha256": "3d2a1d87c3eed35a157c09a684df312d086a0de5196c3472d331b76d4f976161",
+      "started": "2026-10-17T07:16:53+00:00"
     },
     "c49_frontier_positions.json.gz": {
       "sha256": "0109626579e166720bc104e1c7f24b719557419ffb021e4f3c034bd3a5f57634",

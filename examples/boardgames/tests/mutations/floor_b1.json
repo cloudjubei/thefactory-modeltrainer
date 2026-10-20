@@ -1,0 +1,78 @@
+{
+  "file": "harness/floor_b1.py",
+  "tests": ["tests/test_floor_b1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "l5's budgets",
+      "old": "\"builder\": {**L5[\"builder\"], \"budgets\": [[0, 1200.0], [2, 120.0]]},",
+      "new": "\"builder\": dict(L5[\"builder\"]),"
+    },
+    {
+      "name": "another budget",
+      "old": "[2, 120.0]",
+      "new": "[2, 60.0]"
+    },
+    {
+      "name": "another position",
+      "old": "542, 212]",
+      "new": "542, 213]"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": 0.9}",
+      "new": "\"support\": 0.95}"
+    },
+    {
+      "name": "a looser completion",
+      "old": "\"complete_support\": 14,",
+      "new": "\"complete_support\": 13,"
+    },
+    {
+      "name": "a stricter refutation",
+      "old": "\"complete_refute\": 12,",
+      "new": "\"complete_refute\": 13,"
+    },
+    {
+      "name": "judged against its own registration",
+      "old": "    return l4_size(e, control, SPEC, CONTROL)\n",
+      "new": "    return l4_size(e, control, SPEC, SPEC)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "b1_report = w6_report",
+      "new": "b1_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-19T22:01:59+00:00",
+    "killed": 8,
+    "survived": [],
+    "killed_by": {
+      "l5's budgets": [
+        "test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions",
+        "test_the_arm_is_judged_against_the_control_at_nine_tenths"
+      ],
+      "another budget": ["test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions"],
+      "another position": ["test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions"],
+      "a looser support": [
+        "test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions",
+        "test_the_arm_is_judged_against_the_control_at_nine_tenths"
+      ],
+      "a looser completion": [
+        "test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions",
+        "test_completion_is_judged_out_of_sixteen"
+      ],
+      "a stricter refutation": [
+        "test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions",
+        "test_completion_is_judged_out_of_sixteen"
+      ],
+      "judged against its own registration": [
+        "test_the_arm_is_judged_against_the_control_at_nine_tenths"
+      ],
+      "own completion judge": [
+        "test_b1_is_l5_with_longer_deeper_searches_on_f2_s_heaviest_positions"
+      ]
+    }
+  }
+}

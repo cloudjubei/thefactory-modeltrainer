@@ -127,3 +127,51 @@ describe('runKeysForActivity (A6 activity→runs jump)', () => {
     expect(AH.runKeysForActivity(null, 'act-1')).toEqual([])
   })
 })
+
+describe('stopOutcomeNote', () => {
+  it.each([
+    [{ outcome: 'stopped', status: 'aborted' }, 'ok', 'Stopped'],
+    [{ outcome: 'noop', status: 'completed' }, 'muted', 'Already completed — nothing changed'],
+    [{ outcome: 'not-stopped', status: 'completed' }, 'warn', 'Not stopped — it is completed'],
+    [
+      { outcome: 'failed', code: 'adapter-failed' },
+      'warn',
+      'Couldn’t confirm it stopped — it may still be running',
+    ],
+    [{ outcome: 'refused', code: 'not-found' }, 'warn', 'Not stopped — not-found'],
+  ])('says what the host observed for %j', (result, tone, text) => {
+    expect(AH.stopOutcomeNote(result)).toEqual({ tone, text })
+  })
+
+  it('counts what it started that was stopped with it, and warns when some may still run', () => {
+    const c = (outcome: string) => ({ activityId: outcome, parentActivityId: 'a', outcome })
+    expect(AH.stopOutcomeNote({ outcome: 'stopped', children: [c('stopped'), c('noop')] })).toEqual(
+      {
+        tone: 'ok',
+        text: 'Stopped · also stopped 1 it started',
+      },
+    )
+    expect(
+      AH.stopOutcomeNote({ outcome: 'stopped', children: [c('stopped'), c('refused')] }),
+    ).toEqual({ tone: 'warn', text: 'Stopped · 1 of 2 it started may still be running' })
+  })
+
+  it('says a stop the bridge stopped waiting on is still being carried out, and why one could not be sent', () => {
+    const still = { tone: 'warn', text: 'Still stopping — refresh to see where it stands' }
+    expect(AH.stopOutcomeNote(undefined)).toEqual(still)
+    expect(AH.stopOutcomeNote(undefined, 'Overseer bridge timeout: activities.stop')).toEqual(still)
+    expect(AH.stopOutcomeNote(undefined, 'host down')).toEqual({
+      tone: 'warn',
+      text: 'Couldn’t stop it — host down',
+    })
+  })
+
+  it('reads a stop as having ended its activity only when the record has ended', () => {
+    expect(AH.stopEnded({ outcome: 'stopped' })).toBe(true)
+    expect(AH.stopEnded({ outcome: 'noop' })).toBe(true)
+    expect(AH.stopEnded({ outcome: 'not-stopped' })).toBe(true)
+    expect(AH.stopEnded({ outcome: 'failed' })).toBe(false)
+    expect(AH.stopEnded({ outcome: 'refused' })).toBe(false)
+    expect(AH.stopEnded(undefined)).toBe(false)
+  })
+})

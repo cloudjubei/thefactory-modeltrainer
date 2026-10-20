@@ -23,6 +23,7 @@ describe('trainer launchable activities', () => {
       'train-champion',
       'autopilot',
       'tournament',
+      'process-eval',
       'judge',
       'evaluate',
       'cross-test',
@@ -158,6 +159,7 @@ describe('trainer capability record types', () => {
     expect([...TRAINER_RUN_DELETE_CASCADE_SUFFIXES].sort()).toEqual(
       [
         '-evaluation',
+        '-process-eval',
         '-reliability',
         '-settest',
         '-unrunnable',

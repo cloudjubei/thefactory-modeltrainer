@@ -9,7 +9,9 @@
  *
  * window.Exploration.render(container, data, actions)
  *   data    = { manifest, state|null, runs:[{config,objective,metrics,status}], activity:{status}|null }
- *   actions = { onLaunch(budget), onExploreMore(budget), onPause(), onResume(), onAbort(), onRunCells(configs) }
+ *   data.confirmingStop — Stop was pressed once: the controls ask before stopping for good
+ *   actions = { onLaunch(budget), onExploreMore(budget), onPause(), onResume(), onAbort(), onAbortConfirm(),
+ *               onAbortCancel(), onRunCells(configs) }
  *
  * Exposed as window.Exploration in the browser and module.exports under CommonJS (pure analyze/magma tested).
  */
@@ -102,6 +104,8 @@
     .expl-btn{font:inherit;font-family:var(--e-mono);font-size:12.5px;padding:8px 15px;border-radius:8px;border:1px solid var(--e-line);background:var(--e-panel);color:var(--e-text);cursor:pointer}
     .expl-btn.primary{background:var(--e-gold);border-color:transparent;color:#1a1204;font-weight:600}
     .expl-btn:disabled{opacity:.5;cursor:default}
+    .expl-btn.danger{border-color:#e5484d;color:#e5484d}
+    .expl-confirm{font-size:12px;color:var(--e-muted);max-width:260px}
     .expl-btn:focus-visible,.expl-ico:focus-visible,.expl-open:focus-visible,.expl-sel select:focus-visible,.expl-field input:focus-visible{outline:2px solid var(--e-ice);outline-offset:2px}
     .expl-ctrls{display:flex;align-items:center;gap:8px}
     .expl-ico{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--e-line);background:var(--e-panel);color:var(--e-text);font-size:12px;line-height:1;cursor:pointer;font-family:var(--e-mono)}
@@ -759,36 +763,27 @@
     const inProgress = hasState && !done && !paused && !working && !launching && total > 0
     const started = (hasState && total > 0) || working || launching
 
-    // Icon-only transport controls (pause/resume/stop); Start / Explore-again stay labelled (primary action).
-    const ico = (act, glyph, label, cls) =>
-      `<button class="expl-ico ${cls || ''}" data-act="${act}" title="${label}" aria-label="${label}">${glyph}</button>`
-    let head, ctrls, mode
+    let head, mode
     if (launching) {
       mode = 'launching'
       head = '<span class="spin"></span> Starting exploration…'
-      ctrls = ico('abort', '■', 'Stop')
     } else if (working) {
       mode = 'working'
       head = `<span class="pulse"></span> Exploring — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
-      ctrls = ico('pause', '❚❚', 'Pause') + ico('abort', '■', 'Stop') // no Resume while working
     } else if (paused) {
       mode = 'paused'
       head = 'Paused'
-      ctrls = ico('resume', '▶', 'Resume', 'primary') + ico('abort', '■', 'Stop')
     } else if (inProgress) {
       mode = 'stopped'
       head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span>`
-      ctrls = ico('resume', '▶', 'Resume', 'primary') + ico('abort', '■', 'Stop')
     } else if (done) {
       mode = 'done'
       head = 'Converged'
-      // Continue the SAME search (keep the runs, push the frontier deeper/wider) rather than restarting.
-      ctrls = '<button class="expl-btn primary" data-act="explore-more">Explore more</button>'
     } else {
       mode = 'idle'
       head = 'Ready to explore'
-      ctrls = '<button class="expl-btn primary" data-act="launch">Start</button>'
     }
+    const ctrls = transportControls(mode, !!data.confirmingStop)
 
     // Readouts + stage progress are PART of the status (they only exist once the search has started), so they
     // live at the top of the card rather than as a separate strip.
@@ -888,6 +883,27 @@
       .join('')
     const zoom = `<div class="expl-zoom"><button data-expl-zoom="out" title="Coarser value grid (group nearby values)">−</button><button data-expl-zoom="reset" title="Reset grid density">${Math.round((a.vs.zoom || 1) * 100)}%</button><button data-expl-zoom="in" title="Finer value grid (toward one cell per tried value)">+</button></div>`
     return `<div class="expl-mapbar">${axisSel}${pegSel ? '<span style="color:var(--e-faint);font-family:var(--e-mono);font-size:11px">peg:</span>' + pegSel : ''}${zoom}</div>`
+  }
+
+  // The card's controls for a mode: icon-only pause / resume / stop while a search exists, labelled Start /
+  // Explore more otherwise. Stop ends the search, and what it started, for good, so a first press asks in place
+  // (`confirmingStop`) and only Stop there stops it. Pure.
+  function transportControls(mode, confirmingStop) {
+    const ico = (act, glyph, label, cls) =>
+      `<button class="expl-ico ${cls || ''}" data-act="${act}" title="${label}" aria-label="${label}">${glyph}</button>`
+    if (mode === 'done') return '<button class="expl-btn primary" data-act="explore-more">Explore more</button>'
+    if (mode === 'idle') return '<button class="expl-btn primary" data-act="launch">Start</button>'
+    if (confirmingStop) {
+      return (
+        '<span class="expl-confirm">Stop this search for good? What it started stops too; finished runs are kept.</span>' +
+        '<button class="expl-btn danger" data-act="abort-confirm">Stop</button>' +
+        '<button class="expl-btn" data-act="abort-cancel">Cancel</button>'
+      )
+    }
+    const stop = ico('abort', '■', 'Stop')
+    if (mode === 'working') return ico('pause', '❚❚', 'Pause') + stop
+    if (mode === 'paused' || mode === 'stopped') return ico('resume', '▶', 'Resume', 'primary') + stop
+    return stop
   }
 
   function render(container, data, actions) {
@@ -1029,6 +1045,8 @@
     onAct('pause', () => actions.onPause && actions.onPause())
     onAct('resume', () => actions.onResume && actions.onResume())
     onAct('abort', () => actions.onAbort && actions.onAbort())
+    onAct('abort-confirm', () => actions.onAbortConfirm && actions.onAbortConfirm())
+    onAct('abort-cancel', () => actions.onAbortCancel && actions.onAbortCancel())
     container.querySelectorAll('[data-basin-open]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const bi = parseInt(btn.getAttribute('data-basin-open'), 10)
@@ -1046,7 +1064,16 @@
     return b.id ? String(b.id).replace(/[[\]"]/g, '').slice(0, 24) || 'basin' : 'basin'
   }
 
-  const Exploration = { render, analyze, magma, rankLevers, heatmapCells, makeAxis, manualCellConfigs }
+  const Exploration = {
+    render,
+    analyze,
+    magma,
+    rankLevers,
+    heatmapCells,
+    makeAxis,
+    manualCellConfigs,
+    transportControls,
+  }
   if (typeof module !== 'undefined' && module.exports) module.exports = Exploration
   if (root) root.Exploration = Exploration
 })(typeof window !== 'undefined' ? window : null)

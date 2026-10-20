@@ -8476,10 +8476,17 @@
       "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_every_frontier_position_completes",
       "note": "User's choice (2026-10-17): rebuild the whole game with L5. F2 = F1 with only the rule changed (unlevelled safe moves a last level): all 671 frontier positions in W1's seeded order, waves of 32 from a growing library seeded with L2's 90 maps (8,618 bits once), L2's pipeline, 2 h cap. Pilot (h287): 0.84 of a same-rule control on 32 of F1's positions, 0.80 on the heaviest 16, which hold 58% of F1's bits; run-to-run swing ~10% (h282). Resumable (--resume; run files in checkpoints/runs/c49_f2*). harness/floor_f2.py 5 tests, 10/10 mutants. Full suite green (3,105 passed). Fingerprint 7717c79f94ea.",
       "registered_at": "2026-10-17T07:16:44.111907+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_every_frontier_position_completes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 6.12s",
+          "drawn_at": "2026-10-19T21:50:46.585899+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_f2.json.gz",
-        "started": null
+        "started": "2026-10-17T07:16:53+00:00"
       },
       "pins": {
         "tests/test_c49_f2_evidence.py": "bc7cdef19513b6798e8dfebd2025a791af1f250ddb1e3081e25673e8b591c8ae",
@@ -8502,10 +8509,17 @@
       "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_the_whole_strategy_is_a_tenth_smaller_than_f1_s",
       "note": "User's choice (2026-10-17): rebuild the whole game with L5. F2 = F1 with only the rule changed (unlevelled safe moves a last level): all 671 frontier positions in W1's seeded order, waves of 32 from a growing library seeded with L2's 90 maps (8,618 bits once), L2's pipeline, 2 h cap. Pilot (h287): 0.84 of a same-rule control on 32 of F1's positions, 0.80 on the heaviest 16, which hold 58% of F1's bits; run-to-run swing ~10% (h282). Resumable (--resume; run files in checkpoints/runs/c49_f2*). harness/floor_f2.py 5 tests, 10/10 mutants. Full suite green (3,105 passed). Fingerprint 7717c79f94ea.",
       "registered_at": "2026-10-17T07:16:45.082753+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_the_whole_strategy_is_a_tenth_smaller_than_f1_s",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 6.54s",
+          "drawn_at": "2026-10-19T21:51:00.741892+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_f2.json.gz",
-        "started": null
+        "started": "2026-10-17T07:16:53+00:00"
       },
       "pins": {
         "tests/test_c49_f2_evidence.py": "bc7cdef19513b6798e8dfebd2025a791af1f250ddb1e3081e25673e8b591c8ae",
@@ -8520,6 +8534,91 @@
         "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
       },
       "inconclusive_proof": "tests/test_c49_f2_evidence.py::test_c49_f2_the_whole_strategy_s_size_is_undecidable"
+    },
+    "h290": {
+      "id": "h290",
+      "claim": "\u00a73.6 F2 (registered after the data): L5's rule carries its pilot gain to the whole game \u2014 455,959 bits against F1's 548,424 (0.83), every position complete; map bits 222,410 against 292,054, levelled cells 46,314 against 65,608, exception bits 107,049 against 136,253; smaller on 420 positions, larger on 189. Most in the heavy tail: F1's 67 heaviest take 223,703 bits against 311,823 (0.72), though F2's own heaviest 67 still hold 57% of its bits",
+      "mode": "test",
+      "proof": "tests/test_c49_f2_after_evidence.py::test_c49_f2_l5_s_rule_cuts_the_whole_game_by_a_sixth_most_in_the_heavy_tail",
+      "note": "h288, h289 supported (pre-registered). F2 ran 2026-10-17 07:17Z to 10-19 21:47Z; 215.9 build-hours; slowed for hours by other processes on the machine (load 50-75), never stopped. WeakC4's ~35-45K is ~11x smaller.",
+      "registered_at": "2026-10-19T21:51:36.653557+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f2_after_evidence.py::test_c49_f2_l5_s_rule_cuts_the_whole_game_by_a_sixth_most_in_the_heavy_tail",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 7.95s",
+          "drawn_at": "2026-10-19T21:52:00.695099+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_f2.json.gz",
+          "started": "2026-10-17T07:16:53+00:00"
+        },
+        {
+          "path": "evidence/c49_f1.json.gz",
+          "started": "2026-10-13T22:20:39+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_f2_after_evidence.py": "a6692ef88d190612f99dbcd2bbc38d137738e927a7c3b4cf5bcdd045c3e64da9",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e"
+      }
+    },
+    "h291": {
+      "id": "h291",
+      "claim": "\u00a73.6 B1: with the deeper leaf searches given 120 s instead of 30 s, at least 14 of F2's 16 heaviest positions get a complete certified strategy within 2 hours under L5's rule and pipeline. Refuted at 12 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_14_of_16_complete_within_2_hours_with_longer_searches",
+      "note": "User's choice (2026-10-20): longer searches on the heavy tail. B1 = L5's rule and pipeline, no library, the deeper leaf searches (depth 2 and below) given 120 s instead of 30 s; root search 20 min and the 2-h cap unchanged. Positions: F2's 16 heaviest (110,650 F2 bits; #207, #216, #218 already took the full 2 h in F2). Control (harness.floor_b1_control): the same with 30 s, built right after the arm. P1-P2 showed long searches near the root can starve a build, so completion is claimed too. floor_b1 8/8 mutants. Full suite green (3,113 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-19T22:31:24.013713+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_b1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_b1_evidence.py": "b1d97ea2c6ad13d51cf0eac536b2276dacd9912e7ee50e64d11a43c181cbec0c",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_b1_evidence.py::test_c49_b1_completion_is_undecidable"
+    },
+    "h292": {
+      "id": "h292",
+      "claim": "\u00a73.6 B1: giving the deeper leaf searches 120 s instead of 30 s makes the strategies for F2's 16 heaviest positions take no more than nine tenths of a control's bits built the same way with 30 s. Refuted at the control's bits or more (an unfinished root counts at its partial size; an unfinished control root leaves a refutation open)",
+      "mode": "test",
+      "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_longer_searches_make_the_heavy_strategies_a_tenth_smaller",
+      "note": "User's choice (2026-10-20): longer searches on the heavy tail. B1 = L5's rule and pipeline, no library, the deeper leaf searches (depth 2 and below) given 120 s instead of 30 s; root search 20 min and the 2-h cap unchanged. Positions: F2's 16 heaviest (110,650 F2 bits; #207, #216, #218 already took the full 2 h in F2). Control (harness.floor_b1_control): the same with 30 s, built right after the arm. P1-P2 showed long searches near the root can starve a build, so completion is claimed too. floor_b1 8/8 mutants. Full suite green (3,113 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-19T22:31:25.085877+00:00",
+      "evidence": [],
+      "data": [
+        {
+          "path": "evidence/c49_b1.json.gz",
+          "started": null
+        },
+        {
+          "path": "evidence/c49_b1_control.json.gz",
+          "started": null
+        }
+      ],
+      "pins": {
+        "tests/test_c49_b1_evidence.py": "b1d97ea2c6ad13d51cf0eac536b2276dacd9912e7ee50e64d11a43c181cbec0c",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_b1_evidence.py::test_c49_b1_the_size_is_undecidable"
     }
   }
 }

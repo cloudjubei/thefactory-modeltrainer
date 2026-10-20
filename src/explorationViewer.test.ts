@@ -374,3 +374,33 @@ describe('Exploration.magma', () => {
     expect(Exploration.magma(5)).toBe(Exploration.magma(1))
   })
 })
+
+describe('Exploration.transportControls', () => {
+  it.each(['launching', 'working', 'paused', 'stopped'] as const)(
+    'offers Stop while %s, which first asks before stopping for good',
+    (mode) => {
+      const html = Exploration.transportControls(mode, false)
+      expect(html).toContain('data-act="abort"')
+      expect(html).not.toContain('data-act="abort-confirm"')
+      const asking = Exploration.transportControls(mode, true)
+      expect(asking).toContain('data-act="abort-confirm"')
+      expect(asking).toContain('data-act="abort-cancel"')
+      expect(asking).not.toContain('data-act="abort"')
+      expect(asking).toContain('What it started stops too')
+    },
+  )
+
+  it('keeps Pause beside Stop only while working, and Resume while paused or stopped', () => {
+    expect(Exploration.transportControls('working', false)).toContain('data-act="pause"')
+    expect(Exploration.transportControls('paused', false)).toContain('data-act="resume"')
+    expect(Exploration.transportControls('stopped', false)).toContain('data-act="resume"')
+    expect(Exploration.transportControls('launching', false)).not.toContain('data-act="pause"')
+  })
+
+  it('offers Start or Explore more, never a stop, when nothing is running', () => {
+    expect(Exploration.transportControls('idle', true)).toContain('data-act="launch"')
+    expect(Exploration.transportControls('done', true)).toContain('data-act="explore-more"')
+    expect(Exploration.transportControls('idle', true)).not.toContain('abort')
+    expect(Exploration.transportControls('done', true)).not.toContain('abort')
+  })
+})

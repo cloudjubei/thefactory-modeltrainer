@@ -246,3 +246,7 @@
 {"event": "start", "id": "5826184d1c63", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_l5", "--workers", "4", "--out", "evidence/c49_l5.json.gz", "--progress", "checkpoints/runs/c49_l5_progress.json"], "at": "2026-10-16T20:54:12+00:00"}
 {"event": "end", "id": "5826184d1c63", "status": "completed", "at": "2026-10-17T03:04:29+00:00", "seconds": 22216.6}
 {"event": "start", "id": "a8f139b59f37", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_f2", "--workers", "4", "--out", "evidence/c49_f2.json.gz", "--progress", "checkpoints/runs/c49_f2_progress.json"], "at": "2026-10-17T07:16:53+00:00"}
+{"event": "end", "id": "a8f139b59f37", "status": "completed", "at": "2026-10-19T21:48:34+00:00", "seconds": 225100.4}
+{"event": "start", "id": "54a41acaccab", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_b1", "--workers", "4", "--out", "evidence/c49_b1.json.gz", "--progress", "checkpoints/runs/c49_b1_progress.json"], "at": "2026-10-19T22:31:34+00:00"}
+{"event": "end", "id": "54a41acaccab", "status": "completed", "at": "2026-10-20T08:39:48+00:00", "seconds": 36494.1}
+{"event": "start", "id": "c4a749975b17", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_b1_control", "--workers", "4", "--out", "evidence/c49_b1_control.json.gz", "--progress", "checkpoints/runs/c49_b1_control_progress.json"], "at": "2026-10-20T08:39:48+00:00"}

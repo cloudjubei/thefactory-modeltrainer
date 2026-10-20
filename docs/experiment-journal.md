@@ -5524,3 +5524,24 @@ builder's rule changed (`unlevelled` "last"), same order, waves, seed library an
 (no more than nine tenths of F1's 548,424 bits; refuted at F1's or more) pre-registered; 10/10 mutants after a
 boundary test was added (with F1's total the nine-tenths line falls between whole bits, so `<` and `<=` agreed until a
 test used a total where it does not). Chain shell PID 37008; run files in checkpoints/runs/c49_f2*.
+
+## 2026-10-19 — F2: the whole game with L5's rule, 455,959 bits
+
+F2 (F1 with only the rule changed to L5's) finished 21:47Z after 2.6 days — 215.9 build-hours on 4 workers, slowed for
+hours at a time by other processes on the machine (load 50-75; the workers got a fifth to a third of a core) but never
+stopped. Pre-registered: all 671 positions complete (h288 supported) and the certified first-player strategy from the
+empty board takes 455,959 bits — 0.831 of F1's 548,424, under the nine tenths registered (h289 supported). After the
+data (h290): map bits 222,410 against 292,054 (−24%) on 46,314 levelled cells against 65,608 (−29%), exception bits
+107,049 against 136,253 (−21%); smaller on 420 positions, larger on 189, equal on 62. F1's 67 heaviest positions take
+223,703 bits against 311,823 (0.72) — as in the L5 pilot, the gain is in the heavy tail — but F2's own tail is as heavy
+(its heaviest 67 hold 57%). The best certified whole-game strategy so far: 455,959 bits, 0.69 of the net's ~660K and
+~11x WeakC4's ~35-45K.
+
+## 2026-10-20 — B1: longer searches on the heavy tail (user's choice)
+
+F2's 67 heaviest positions hold 57% of its bits. B1 gives the builder's deeper leaf searches (depth 2 and below) 120 s
+instead of 30 s — the 20-minute root search and the 2-hour cap unchanged — on F2's 16 heaviest positions, L5's rule and
+pipeline, no library, against a control built the same way with 30 s right after (harness.floor_b1, floor_b1_control;
+8/8 mutants). P1-P2 showed long searches below the root can starve a build of its 2 hours, so completion is
+pre-registered as well as size: h291 (14 of 16 complete) and h292 (nine tenths of the control). Launched 22:31Z, chain
+shell PID 21710.
