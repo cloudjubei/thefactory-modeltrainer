@@ -13,7 +13,7 @@ from games.connect4 import Connect4
 from harness.c4_oracle import solve
 from harness.native_leaf import needed as native
 from harness.steady_exceptions import needed as reference
-from harness.steady_state import Facts
+from harness.steady_state import SWITCH, Facts, phase_cell
 
 GAME = Connect4()
 
@@ -57,6 +57,14 @@ def _maps(facts, s, rng):
     yield {c: rng.randrange(8) for c in rng.sample(empty, min(4, len(empty)))}
     yield {c: rng.randrange(8) for c in empty}
     yield {c: 0 for c in empty}
+    yield _phased(s, empty, rng)
+
+
+def _phased(s, empty, rng):
+    stones = sum(1 for v in s.board if v)
+    return {**{c: rng.randrange(8) for c in rng.sample(empty, min(6, len(empty)))},
+            **{phase_cell(c): rng.randrange(8) for c in rng.sample(empty, min(6, len(empty)))},
+            SWITCH: stones + rng.choice((2, 4, 6))}
 
 
 @pytest.fixture(scope="module")
@@ -83,7 +91,7 @@ def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions,
         for levels in _maps(facts, s, rng):
             assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
             checked += 1
-    assert checked == 4 * len(positions)
+    assert checked == 5 * len(positions)
 
 
 def test_fewer_levels_read_the_same_map_differently_in_both(positions):
@@ -147,7 +155,7 @@ def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positi
         facts = Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled, order=order)
         empty = facts.empty_cells(s)
         for levels in ({}, {c: rng.randrange(8) for c in empty}, {c: 0 for c in empty},
-                       {c: k for k, c in enumerate(empty[:8])}):
+                       {c: k for k, c in enumerate(empty[:8])}, _phased(s, empty, rng)):
             for n in (1, 8):
                 assert native_verify(facts, s, levels, n) == python_verify(facts, s, levels, n)
 
@@ -267,4 +275,21 @@ def test_both_walks_play_a_win_in_two_over_a_lower_move():
         assert native(tactics, s, {}, 8, None, 1_000_000) == reference(tactics, s, {}, 8, _winning, 1_000_000)
         assert native_verify(tactics, s, {}, 8) == python_verify(tactics, s, {}, 8)
         found += 1
+
+
+def test_a_switch_changes_what_both_walks_find(positions):
+    from harness.native_leaf import verify as native_verify
+    from harness.steady_state import verify as python_verify
+
+    facts = Facts(GAME, ties="lowest", unlevelled="last")
+    changed = 0
+    for s in positions:
+        empty = facts.empty_cells(s)
+        stones = sum(1 for v in s.board if v)
+        one = {c: k for k, c in enumerate(empty[:8])}
+        two = {**one, SWITCH: stones + 2, **{phase_cell(c): k for k, c in enumerate(reversed(empty[-8:]))}}
+        assert native(facts, s, two, 8, None, 1_000_000) == reference(facts, s, two, 8, _winning, 1_000_000)
+        assert native_verify(facts, s, two, 8) == python_verify(facts, s, two, 8)
+        changed += native(facts, s, one, 8, None, 1_000_000) != native(facts, s, two, 8, None, 1_000_000)
+    assert changed
 

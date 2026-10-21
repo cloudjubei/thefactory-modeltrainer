@@ -9,7 +9,7 @@ import pytest
 
 from games.tictactoe import TicTacToe, TTTState
 from harness.steady_search import find_steady_state
-from harness.steady_state import Facts, verify
+from harness.steady_state import SWITCH, Facts, phase_cell, verify
 from harness.strategy_builder import Builder, check
 
 GAME = TicTacToe()
@@ -768,3 +768,44 @@ def test_researching_a_tie_keeps_the_leaf():
     b.search = _found({4: 0})
     b.bits = lambda: {"nodes": 7}
     assert b.research(60.0) == {"tried": 1, "kept": 0} and (b.nodes, b.maps) == before
+
+
+TWO_PHASES = {3: 0, SWITCH: 4, phase_cell(4): 0}
+
+
+def test_a_library_map_covers_a_position_with_both_its_phases():
+    b = _with_library([({**TWO_PHASES, 0: 1, phase_cell(1): 1}, 8)],
+                      search=lambda s, start, seconds: pytest.fail("searched"))
+    assert b.build(EARLY) and b.nodes[GAME.state_key(EARLY)] == {"leaf": 1}
+
+
+def test_the_search_starts_from_the_most_recent_map_with_both_phases_on_the_cells_still_empty():
+    starts = []
+
+    def search(s, start, seconds):
+        starts.append(start)
+        return None
+
+    b = _builder(search=search)
+    b.maps.append({5: 1, 0: 0, SWITCH: 6, phase_cell(5): 0, phase_cell(0): 1})
+    b.map_empty.append(6)
+    b.build(FORK)
+    assert starts[0] == {5: 1, SWITCH: 6, phase_cell(5): 0}
+
+
+def test_check_plays_a_leaf_s_second_phase():
+    facts = Facts(GAME)
+    nodes = {GAME.state_key(EARLY): {"leaf": 1}}
+    assert check(facts, EARLY, nodes, [{}, TWO_PHASES], 2, 100_000)["won"]
+    assert not check(facts, EARLY, nodes, [{}, {3: 0}], 2, 100_000)["won"]
+
+
+def test_with_phases_every_map_the_build_pays_for_carries_a_flag_bit():
+    def search(s, start, seconds):
+        return {"levels": {4: 0}, "exceptions": {}, "own_positions": None}
+
+    facts = Facts(GAME)
+    b = Builder(facts, _winning, search, n_levels=2, level_bits=3, cap=100_000, min_leaf_depth=0, reuse_window=50,
+                seconds=60.0, library=[({6: 0}, 4)], phases=True)
+    assert b.build(FORK) and b.bits()["map_bits"] == 5 + 3 + 1 and b.bits()["nodes"] == 1 + 2 + 5 + 3 + 1
+

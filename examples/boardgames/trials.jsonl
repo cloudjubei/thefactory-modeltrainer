@@ -258,3 +258,7 @@
 {"event": "start", "id": "41be95063d08", "name": "c4_default_accuracy", "argv": ["--spec", "harness.floor_l5", "--targets", "c49_l5.json.gz", "--out", "evidence/c49_d1.json.gz"], "at": "2026-10-20T22:35:08+00:00"}
 {"event": "end", "id": "41be95063d08", "status": "completed", "at": "2026-10-20T22:39:15+00:00", "seconds": 247.1}
 {"event": "start", "id": "33f3a3807f49", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_l6", "--workers", "4", "--out", "evidence/c49_l6.json.gz", "--progress", "checkpoints/runs/c49_l6_progress.json"], "at": "2026-10-21T00:52:59+00:00"}
+{"event": "end", "id": "33f3a3807f49", "status": "completed", "at": "2026-10-21T07:43:57+00:00", "seconds": 24658.9}
+{"event": "start", "id": "6c65fb5e656e", "name": "c4_phase_pilot", "argv": ["--spec", "harness.floor_k0", "--workers", "4", "--out", "evidence/c49_k0.json.gz"], "at": "2026-10-21T10:34:17+00:00"}
+{"event": "end", "id": "6c65fb5e656e", "status": "completed", "at": "2026-10-21T10:45:18+00:00", "seconds": 661.1}
+{"event": "start", "id": "9cb82cbd9a83", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_k1", "--workers", "4", "--out", "evidence/c49_k1.json.gz", "--progress", "checkpoints/runs/c49_k1_progress.json"], "at": "2026-10-21T14:55:25+00:00"}

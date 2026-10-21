@@ -514,10 +514,18 @@ rule standalone and in decision-list order, by ply.
     positions with several safe moves sampled from L5's certified leaves and solved, the lowest move keeps the win at
     93.2% (random 92.8%); plain reorderings do no better, but "tactics" — first a move that wins by force in two, then
     one that does not lose by force in two, else the lowest — misses 200 against 308 (0.65). It becomes L6's rule.
-  - **L6 (h298, h300; running since 2026-10-21 00:53Z, user's choice: another zero-bit rule):** L5 with ties broken
-    by tactics (`Facts.order`), on L4's 32 positions, against L5 (109,017 bits): ≥28/32 complete; ≤0.9 of L5's bits.
-    h299 = h300 registered with L5's file as data too (would read post-hoc) — supersede by h300 once judged. ~8 h.
-    Run files in checkpoints/runs/c49_l6*.
+  - **L6 result (h298 supported, h300 inconclusive — pre-registered; h299 superseded; h301 after the data): a
+    better default is no lever on the heavy tail.** Ties broken by tactics: 32/32 complete, 102,289 bits against L5's
+    109,017 (0.94, smaller on 19, larger on 11, p = 0.2 — within run-to-run swing). Maps −13%, exceptions +13%; the
+    light 16 at 0.66, the heavy 16 at 0.97. D1's 35% fewer default misses did not become a smaller heavy tail.
+  - **K0 result (h302 inconclusive — pre-registered; h303 after the data): two-phase maps (user's choice: richer
+    leaves, paid in bits).** Built: `SWITCH`/`phase_cell` maps (Python + C walk), phase moves in the local search
+    (judged without the phase's fixed cost), `phases` in the builder (flag bit a map). Piloted on 45 of L6's heavy split
+    positions, same 30-s search with/without: 20 smaller, 18 larger; gains only on leaves too large to keep (total
+    0.53, a few 17K-613K-bit leaves); under 5,000 bits larger on 17 of 26.
+  - **K1 (h304, h305, h306; running since 2026-10-21 14:55Z, user's choice: run it anyway):** L6 with two-phase maps,
+    L4's 32 positions, against L6 (102,289 bits; heavy 16 94,250): ≥28/32 complete; ≤0.9 of L6 in total; ≤0.9 on the
+    heavy 16. ~7-8 h. Run files in checkpoints/runs/c49_k1*.
 
 ## 4. The hybrid process — definition of done
 

@@ -4,8 +4,8 @@
  * of the priority map holding exactly one safe move — or, with `ties_lowest`, any safe move, the lowest column
  * deciding; else no move — a move safe when the opponent cannot win at once after it, and with `safe_depth` 2 nor
  * force a win in two; with `forcing`, of several safe moves those leaving the opponent at most one reply that stops an
- * immediate win, when any do; with `unlevelled_last`, the safe moves on unlevelled cells read as a last level), and
- * where its move is not a winning one an
+ * immediate win, when any do; with `unlevelled_last`, the safe moves on unlevelled cells read as a last level; with
+ * `switch_at` >= 0, the map's second 42 levels from that many stones on), and where its move is not a winning one an
  * exception plays the lowest winning column instead; every reply is followed. Moves are judged by the exact solve of
  * harness/c4solver.c (included below), and only the moves that decide: the map's move where it gives one, otherwise
  * columns from the left up to the first winning one (h210) — each result cached by the position it leads to across
@@ -261,7 +261,7 @@ static double now(void) {
  * exception plays the lowest winning column (written as (position, mask, column) triples). Positions are visited in
  * the Python walks' order, so counts match them even at a failure. */
 static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
                 double seconds, int verify_only, uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move,
                 int64_t max_exceptions, int64_t *n_exceptions, int64_t *own_positions, int64_t *positions) {
     *n_exceptions = 0;
@@ -310,7 +310,8 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
         }
         if ((s.moves & 1) == player_parity) {
             (*own_positions)++;
-            int immediate, move = rule_move(s.position, s.mask, levels, n_levels, ties_lowest, safe_depth, forcing,
+            const int8_t *phase = switch_at >= 0 && s.moves >= switch_at ? levels + TOTAL : levels;
+            int immediate, move = rule_move(s.position, s.mask, phase, n_levels, ties_lowest, safe_depth, forcing,
                                             unlevelled_last, tactics, &immediate);
             if (verify_only && move < 0) {
                 status = VERIFY_UNDEFINED;
@@ -352,11 +353,11 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
 
 /* harness.steady_exceptions.needed: a WALK_* status; on WALK_OK the exceptions and *own_positions are set. */
 int c4_leaf_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                 int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                 int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
                  double seconds, uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move, int64_t max_exceptions,
                  int64_t *n_exceptions, int64_t *own_positions) {
     int64_t positions;
-    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,
+    return walk(root_position, root_mask, root_moves, levels, n_levels, switch_at, ties_lowest, safe_depth, forcing,
                 unlevelled_last, tactics, cap, seconds, 0, exc_position, exc_mask, exc_move, max_exceptions, n_exceptions,
                 own_positions, &positions);
 }
@@ -364,9 +365,9 @@ int c4_leaf_walk(uint64_t root_position, uint64_t root_mask, int root_moves, con
 /* harness.steady_state.verify: 0 when every line is won, else WALK_CAP, WALK_TIMEOUT, VERIFY_UNDEFINED, VERIFY_DRAW,
  * VERIFY_LOSS or WALK_OUT_OF_MEMORY; *own_positions and *positions as walked. */
 int c4_verify_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                   int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                   int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
                    double seconds, int64_t *own_positions, int64_t *positions) {
     int64_t n_exceptions;
-    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,
+    return walk(root_position, root_mask, root_moves, levels, n_levels, switch_at, ties_lowest, safe_depth, forcing,
                 unlevelled_last, tactics, cap, seconds, 1, NULL, NULL, NULL, 0, &n_exceptions, own_positions, positions);
 }

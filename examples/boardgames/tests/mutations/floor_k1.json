@@ -1,0 +1,121 @@
+{
+  "file": "harness/floor_k1.py",
+  "tests": ["tests/test_floor_k1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "one phase",
+      "old": "\"builder\": {**L6[\"builder\"], \"phases\": True}",
+      "new": "\"builder\": dict(L6[\"builder\"])"
+    },
+    {
+      "name": "another heavy set",
+      "old": "\"heavy\": L4[\"indices\"][:16]}",
+      "new": "\"heavy\": L4[\"indices\"][16:]}"
+    },
+    {
+      "name": "total judged against its own registration",
+      "old": "    return l4_size(e, control, spec, L6)\n",
+      "new": "    return l4_size(e, control, spec, spec)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "k1_report = w6_report",
+      "new": "k1_report = lambda e, spec: w6_report(e, spec)"
+    },
+    {
+      "name": "heavy judged without integrity",
+      "old": "    if _integrity(e, spec) or _integrity(control, L6):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "heavy control judged as the arm",
+      "old": "_integrity(control, L6):\n",
+      "new": "_integrity(control, spec):\n"
+    },
+    {
+      "name": "heavy arm over every root",
+      "old": "    arm = [r for r in e[\"roots\"] if r[\"index\"] in heavy]",
+      "new": "    arm = list(e[\"roots\"])"
+    },
+    {
+      "name": "heavy control over every root",
+      "old": "    base = [r for r in control[\"roots\"] if r[\"index\"] in heavy]",
+      "new": "    base = list(control[\"roots\"])"
+    },
+    {
+      "name": "heavy support boundary",
+      "old": "\"supported\" if not lower and ratio <= spec[\"support\"]",
+      "new": "\"supported\" if not lower and ratio < spec[\"support\"]"
+    },
+    {
+      "name": "heavy refute boundary",
+      "old": "\"refuted\" if not control_lower and ratio >= 1",
+      "new": "\"refuted\" if not control_lower and ratio > 1"
+    },
+    {
+      "name": "an unfinished heavy arm supports",
+      "old": "\"supported\" if not lower and",
+      "new": "\"supported\" if"
+    },
+    {
+      "name": "an unfinished heavy control refutes",
+      "old": "\"refuted\" if not control_lower and",
+      "new": "\"refuted\" if"
+    },
+    {
+      "name": "an unfinished light root bounds the arm",
+      "old": "    lower = not all(r[\"complete\"] for r in arm)",
+      "new": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-21T08:34:54+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "one phase": [
+        "test_k1_is_l6_with_two_phase_maps_on_l4_s_positions",
+        "test_k1_s_total_is_judged_against_l6_under_l6_s_own_registration",
+        "test_the_heavy_judge_needs_both_runs_as_registered"
+      ],
+      "another heavy set": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count",
+        "test_k1_is_l6_with_two_phase_maps_on_l4_s_positions",
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "total judged against its own registration": [
+        "test_k1_s_total_is_judged_against_l6_under_l6_s_own_registration"
+      ],
+      "own completion judge": ["test_k1_is_l6_with_two_phase_maps_on_l4_s_positions"],
+      "heavy judged without integrity": ["test_the_heavy_judge_needs_both_runs_as_registered"],
+      "heavy control judged as the arm": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count",
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "heavy arm over every root": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count",
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "heavy control over every root": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count",
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "heavy support boundary": [
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "heavy refute boundary": [
+        "test_the_heavy_sixteen_are_judged_against_l6_s_same_sixteen_alone"
+      ],
+      "an unfinished heavy arm supports": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count"
+      ],
+      "an unfinished heavy control refutes": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count"
+      ],
+      "an unfinished light root bounds the arm": [
+        "test_an_unfinished_heavy_root_only_bounds_the_arm_and_an_unfinished_light_one_does_not_count"
+      ]
+    }
+  }
+}

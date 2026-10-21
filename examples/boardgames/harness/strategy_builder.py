@@ -15,7 +15,8 @@ Depth first from the root, each of the side's positions becomes:
 Once a line reaches a leaf its map plays the rest of the game; each leaf's map was verified from the leaf over every
 continuation, so the composite wins wherever play goes. `check` re-walks the whole strategy without the oracle. Size:
 one bit per node (move or leaf), three bits per table move, a leaf's reference into the map list, every map's bits
-(harness.steady_state.map_bits over the cells empty where it was found) and, once any leaf carries exceptions, a flag
+(harness.steady_state.map_bits over the cells empty where it was found; with `phases`, a flag bit each for whether a
+second phase follows — the search may then switch one on) and, once any leaf carries exceptions, a flag
 bit per leaf plus each such leaf's exceptions coded in walk order (harness.exception_coding: flags only where the
 rules leave a choice, h183).
 
@@ -35,19 +36,19 @@ import time
 
 from harness.exception_coding import walk_order_cost
 from harness.steady_exceptions import choose_with, verify_with
-from harness.steady_state import Facts, map_bits, simplify, verify
+from harness.steady_state import Facts, map_bits, restrict, simplify, verify
 
 
 class Builder:
     def __init__(self, facts: Facts, winning, search, n_levels: int, level_bits: int, cap: int,
                  min_leaf_depth: int, reuse_window: int, seconds: float, accept: float | None = None,
                  budgets: list | None = None, library: list | None = None, verifier=verify,
-                 choose_by_size: bool = False):
+                 choose_by_size: bool = False, phases: bool = False):
         self.facts, self.game = facts, facts.game
         self.winning, self.search = winning, search
         self.n_levels, self.level_bits, self.cap = n_levels, level_bits, cap
         self.min_leaf_depth, self.reuse_window, self.accept = min_leaf_depth, reuse_window, accept
-        self.verifier, self.choose_by_size = verifier, choose_by_size
+        self.verifier, self.choose_by_size, self.phases = verifier, choose_by_size, phases
         self.budgets = sorted(budgets or [])
         self.deadline = time.monotonic() + seconds
         self.shared = len(library or [])
@@ -59,9 +60,9 @@ class Builder:
 
     def _covering_map(self, state):
         recent = range(len(self.maps) - 1, max(0, len(self.maps) - 1 - self.reuse_window), -1)
-        empty = set(self.facts.empty_cells(state))
+        empty = self.facts.empty_cells(state)
         for i in [0, *recent]:
-            levels = {c: k for c, k in self.maps[i].items() if c in empty}
+            levels = restrict(self.maps[i], empty)
             if self.verifier(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline)["won"]:
                 return i
         return None
@@ -95,7 +96,7 @@ class Builder:
             return None
         self.searches["tried"] += 1
         empty = self.facts.empty_cells(state)
-        start = {c: k for c, k in self.maps[-1].items() if c in set(empty)}
+        start = restrict(self.maps[-1], empty)
         result = self.search(state, start, self._budget(depth))
         if result is None:
             return None
@@ -224,7 +225,7 @@ class Builder:
             tried.add(key)
             state, _depth = self.leaf_states[key]
             empty = self.facts.empty_cells(state)
-            start = {c: k for c, k in self.maps[self.nodes[key]["leaf"]].items() if c in set(empty)}
+            start = restrict(self.maps[self.nodes[key]["leaf"]], empty)
             result = self.search(state, start, min(seconds, max(0.0, self.deadline - time.monotonic())))
             if result is None:
                 continue
@@ -264,7 +265,8 @@ class Builder:
         leaves = len(self.nodes) - moves
         ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0
         own = 1 + self.shared
-        maps = sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[own:], self.map_empty[own:]))
+        maps = (sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[own:], self.map_empty[own:]))
+                + (len(self.maps) - own if self.phases else 0))
         move_bits = math.ceil(math.log2(self.game.num_actions))
         excepted = [n for n in self.nodes.values() if n.get("exceptions")]
         exc_bits = leaves + sum(n["coded"] for n in excepted) if excepted else 0
@@ -309,8 +311,7 @@ def check(facts: Facts, root, nodes: dict, maps: list, n_levels: int, cap: int) 
         if "move" in node:
             stack.append(game.step(s, node["move"]))
             continue
-        empty = set(facts.empty_cells(s))
-        levels = {c: k for c, k in maps[node["leaf"]].items() if c in empty}
+        levels = restrict(maps[node["leaf"]], facts.empty_cells(s))
         exc = node.get("exceptions", {})
         walk = verify_with(facts, s, levels, n_levels, exc, cap)
         if not walk["won"]:

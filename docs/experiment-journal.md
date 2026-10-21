@@ -5595,3 +5595,39 @@ data too, which would time it after the data; to be superseded by h300. Mutants:
 native_leaf 21, floor_l6 5 — all killed (two equivalent rank swaps dropped with a note; unreachable checks removed from
 wins_in_two). Full suite 3,150 passed. Fingerprint ce56e01571bb. Chain shell PID 86693.
 
+## 2026-10-21 — L6 judged: tactics as the tie-break is no lever on the heavy tail
+
+L6 ended 07:44Z (6 h 51 m). Pre-registered: h298 supported — 32 of 32 complete; h300 inconclusive — 102,289 bits
+against L5's 109,017 (0.94), short of the nine tenths registered, under L5's own (refuted only at 1.0). h299 (h300's
+twin with L5's file declared as data too) superseded by h300. After the data (h301): tactics trade maps for exceptions
+— 424 leaves need no map against 281, maps 784 -> 699 (59,697 -> 52,122 bits), exceptions 2,262 -> 2,656 (28,764 ->
+32,407 bits) — and help the light positions far more than the heavy: F1's 16 heaviest of the 32 take 94,250 bits
+against 96,913 (0.97), the rest 8,039 against 12,104 (0.66). Smaller on 19, larger on 11, 2 tied: sign test p = 0.2,
+so the whole is not told apart from the ~10% run-to-run swing (h282). Builds 25.5 CPU-hours against 23.5. D1's default
+was right more often (200 misses against 308), but where the heavy tail's bits go — leaves that need many levels or
+exceptions — the default's few wrong moves are not what costs.
+
+## 2026-10-21 — K0: two-phase maps piloted (user's choice: richer leaves, paid in bits)
+
+Built the language: a map may hold a SWITCH (a number of stones) and second levels on phase_cell(cell) keys (-2 and
+down), read from the switch on; one-phase maps play as before. Paid as a switch (stones past the leaf root, ceil(log2
+empty) bits), a second bitmap over the empty cells and its levels, and with `phases` a flag bit per map. The local
+search may switch a phase on (a copy of the first), move or drop it, and send half its level changes to the second
+phase; a change is judged without the fixed cost of having a second phase (a copy plays the same, so a plain
+hill-climb never takes it), the best leaf kept by its whole size. The C walk reads 84 levels and the switch; Python and
+C agree on every map shape tested. A 10-min smoke of #324 (both arms unfinished at the cap) kept no two-phase map, so
+the mechanism was measured before an 8-hour build: K0 searched 45 positions where L6's heavy strategies split (3 a
+root, seed 0) for 30 s without and with phases, same seed (scripts/c4_phase_pilot.py). Pre-registered h302
+inconclusive: smaller at 20, larger at 18 (median ratio 1.0); 11 searches ended on a switched map. After the data
+(h303): the two-phase leaves total 976,657 bits against 1,832,901 over the 43 both found, but the gap is a few leaves
+of 17K-613K bits — where exceptions slow the one-phase walks so much that it makes a few dozen evaluations in 30 s —
+while on the 26 positions whose one-phase leaf is under 5,000 bits the two-phase one is larger on 17 and smaller on 4
+(24,160 bits against 15,904). Where a keepable leaf is in reach, the second phase's cost and the diluted search lose.
+Also: my first spec for this overwrote the old harness/floor_p1.py and its tests (h194-h280's pinned judge); restored
+from git, matching the pinned hash, and the new experiment named K.
+
+K1 launched 2026-10-21 14:55Z (user's choice: run it anyway — the builder splits and improves, so only the build
+decides): L6's rule and pipeline with two-phase maps allowed, on L4's 32 positions, judged against L6 — h304 (28 of 32
+complete), h305 (nine tenths of L6's 102,289 bits), h306 (nine tenths of L6's 94,250 on F1's 16 heaviest). Fingerprint
+98b7fb6ebf7f. Chain shell PID 83158.
+

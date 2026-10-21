@@ -4,12 +4,14 @@ hand: in X{0,1} O{2,3} with X to move, no move wins at once and every move is sa
 that wins, so the map {4: 0} wins and no other one-cell map does."""
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from games.connect4 import Connect4
 from games.kalah import Kalah
 from games.tictactoe import TicTacToe, TTTState
-from harness.steady_state import Facts, choose, map_bits, simplify, verify
+from harness.steady_state import SWITCH, Facts, choose, map_bits, phase_cell, restrict, simplify, verify
 
 
 def _ttt(x, o, to_move=0):
@@ -312,6 +314,58 @@ def test_simplify_drops_every_level_the_win_does_not_need(facts):
     assert verify(facts, FORK, {4: 0, 5: 1, 6: 1}, 2)["won"]
     assert simplify(facts, FORK, {4: 0, 5: 1, 6: 1}, 2) == {4: 0}
     assert simplify(facts, FORK, {5: 0}, 2) == {5: 0}
+
+
+SIX = _ttt((0, 1, 5), (2, 3, 7))
+TWO = _ttt((0,), (1,))
+PHASED = {5: 0, SWITCH: 6, phase_cell(4): 0}
+
+
+def test_a_second_phase_s_cells_are_kept_apart_from_the_first_s():
+    assert SWITCH == -1 and [phase_cell(c) for c in (0, 4, 8)] == [-2, -6, -10]
+
+
+def test_a_switched_map_reads_its_first_levels_before_the_switch_and_its_second_from_it(facts):
+    assert choose(facts, FORK, PHASED, 2) == 5 and facts.of(SIX)[1] == [4, 6, 8]
+    assert choose(facts, SIX, PHASED, 2) == 4
+    assert choose(facts, SIX, {**PHASED, SWITCH: 7}, 2) is None
+    assert choose(facts, FORK, {**PHASED, SWITCH: 4}, 2) == 4
+
+
+def test_a_map_without_a_switch_has_one_phase(facts):
+    assert choose(facts, SIX, {5: 0, 4: 0}, 2) == 4 and choose(facts, FORK, {5: 0}, 2) == 5
+
+
+def test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does(facts):
+    empty = facts.empty_cells(TWO)
+    singles = [{c: 0 for c in cells} for r in range(len(empty) + 1) for cells in itertools.combinations(empty, r)]
+    assert not any(verify(facts, TWO, m, 1)["won"] for m in singles)
+    assert verify(facts, TWO, {3: 0, SWITCH: 4, phase_cell(4): 0}, 1)["won"]
+
+
+def test_restricting_a_map_keeps_both_phases_cells_that_are_empty_and_the_switch(facts):
+    assert restrict({5: 0, 0: 1, SWITCH: 6, phase_cell(4): 2, phase_cell(1): 0}, facts.empty_cells(FORK)) == {
+        5: 0, SWITCH: 6, phase_cell(4): 2}
+    assert restrict({5: 0, 0: 1}, facts.empty_cells(FORK)) == {5: 0}
+
+
+def test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first():
+    assert map_bits({4: 0, SWITCH: 6, phase_cell(4): 0, phase_cell(5): 1}, 5, 3) == 5 + 3 + 3 + 5 + 6
+    assert map_bits({SWITCH: 6}, 30, 3) == 30 + 5 + 30
+    with pytest.raises(ValueError, match="switch"):
+        map_bits({4: 0, phase_cell(5): 1}, 5, 3)
+    with pytest.raises(ValueError, match="levelled"):
+        map_bits({SWITCH: 3, phase_cell(1): 0, phase_cell(2): 0}, 1, 3)
+
+
+def test_simplify_drops_a_second_phase_the_win_does_not_need(facts):
+    assert simplify(facts, FORK, {4: 0, SWITCH: 6, phase_cell(4): 0}, 2) == {4: 0}
+
+
+def test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells(facts):
+    levels = {3: 0, SWITCH: 4, phase_cell(4): 0, phase_cell(8): 1}
+    assert verify(facts, TWO, levels, 2)["won"] and not verify(facts, TWO, {3: 0}, 2)["won"]
+    assert simplify(facts, TWO, levels, 2) == {3: 0, SWITCH: 4, phase_cell(4): 0}
 
 
 def test_facts_are_computed_once_per_position(facts, monkeypatch):

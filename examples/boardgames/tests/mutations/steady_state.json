@@ -60,18 +60,18 @@
     },
     {
       "name": "empty cells free",
-      "old": "    return empty + level_bits * len(levels)",
-      "new": "    return level_bits * len(levels)"
+      "old": "    bits = empty + level_bits * len(first)",
+      "new": "    bits = level_bits * len(first)"
     },
     {
       "name": "oversized map accepted",
-      "old": "    if len(levels) > empty:",
+      "old": "    if max(len(first), len(second)) > empty:",
       "new": "    if False:"
     },
     {
       "name": "simplify drops unverified",
-      "old": "        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
-      "new": "        if True:"
+      "old": "        trial = {c: k for c, k in kept.items() if c != cell}\n        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
+      "new": "        trial = {c: k for c, k in kept.items() if c != cell}\n        if True:"
     },
     {
       "name": "facts cache unbounded",
@@ -100,8 +100,8 @@
     },
     {
       "name": "simplify deadline not passed",
-      "old": "        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
-      "new": "        if check(facts, root, trial, n_levels, cap)[\"won\"]:"
+      "old": "        trial = {c: k for c, k in kept.items() if c != cell}\n        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
+      "new": "        trial = {c: k for c, k in kept.items() if c != cell}\n        if check(facts, root, trial, n_levels, cap)[\"won\"]:"
     },
     {
       "name": "simplify ignores its verifier",
@@ -292,20 +292,88 @@
       "name": "one answer without a threat suffices",
       "old": "        if game.is_terminal(child) or game.current_player(child) == game.current_player(state):\n            return False\n        for b in game.legal_actions(child):\n            after = game.step(child, b)\n            if not any(self._wins_now(after, d) for d in game.legal_actions(after)):\n                return False\n        return True",
       "new": "        if game.is_terminal(child) or game.current_player(child) == game.current_player(state):\n            return False\n        for b in game.legal_actions(child):\n            after = game.step(child, b)\n            if any(self._wins_now(after, d) for d in game.legal_actions(after)):\n                return True\n        return False"
+    },
+    {
+      "name": "a second phase dropped unverified",
+      "old": "        trial = {c: k for c, k in kept.items() if c >= 0}\n        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
+      "new": "        trial = {c: k for c, k in kept.items() if c >= 0}\n        if True:"
+    },
+    {
+      "name": "a second phase never dropped",
+      "old": "    if SWITCH in kept:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "second phase from a stone past the switch",
+      "old": "    if SWITCH in levels and facts.cells - len(facts.empty_cells(state)) >= levels[SWITCH]:",
+      "new": "    if SWITCH in levels and facts.cells - len(facts.empty_cells(state)) > levels[SWITCH]:"
+    },
+    {
+      "name": "second phase never read",
+      "old": "    if SWITCH in levels and facts.cells - len(facts.empty_cells(state)) >= levels[SWITCH]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "the phase read before the facts",
+      "old": "    if len(safe) == 1:\n        return safe[0]\n    levels = _phase(facts, state, levels)\n",
+      "new": "    if len(safe) == 1:\n        return safe[0]\n"
+    },
+    {
+      "name": "phase cells unmapped",
+      "old": "    return -cell - 2\n",
+      "new": "    return -cell - 1\n"
+    },
+    {
+      "name": "restrict drops the switch",
+      "old": "c == SWITCH or ",
+      "new": ""
+    },
+    {
+      "name": "restrict drops the second phase",
+      "old": "(c if c >= 0 else phase_cell(c)) in empty",
+      "new": "c in empty"
+    },
+    {
+      "name": "a second phase without its switch accepted",
+      "old": "    if second and SWITCH not in levels:",
+      "new": "    if False:"
+    },
+    {
+      "name": "an oversized second phase accepted",
+      "old": "    if max(len(first), len(second)) > empty:",
+      "new": "    if len(first) > empty:"
+    },
+    {
+      "name": "the switch free",
+      "old": "        bits += max(0, (empty - 1).bit_length()) + empty",
+      "new": "        bits += empty"
+    },
+    {
+      "name": "the second phase's bitmap free",
+      "old": "        bits += max(0, (empty - 1).bit_length()) + empty + level_bits",
+      "new": "        bits += max(0, (empty - 1).bit_length()) + level_bits"
+    },
+    {
+      "name": "the second phase's levels free",
+      "old": " + empty + level_bits * len(second)",
+      "new": " + empty"
     }
   ],
   "last_run": {
-    "at": "2026-10-21T00:38:11+00:00",
-    "killed": 58,
+    "at": "2026-10-21T08:33:30+00:00",
+    "killed": 71,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
       "win not played first": [
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
         "test_a_verify_within_its_deadline_is_unchanged",
         "test_a_walk_past_the_cap_is_rejected",
         "test_a_winning_map_is_verified_over_every_reply",
         "test_a_winning_move_is_played_whatever_the_map",
+        "test_simplify_drops_a_second_phase_the_win_does_not_need",
         "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_simplify_uses_the_given_verifier",
         "test_tactics_change_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
@@ -325,6 +393,7 @@
         "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
       ],
       "first level holding any safe move decides": [
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
         "test_the_last_level_is_read_like_any_other",
@@ -334,6 +403,7 @@
       ],
       "levels read backwards": [
         "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]",
@@ -359,13 +429,17 @@
       ],
       "draw accepted": [
         "test_a_forced_draw_is_rejected",
-        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]"
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does"
       ],
       "undefined skipped": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels0-undefined]",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels3-undefined]",
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
+        "test_simplify_drops_a_second_phase_the_win_does_not_need",
         "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
@@ -373,13 +447,23 @@
       ],
       "one reply walked": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
-        "test_a_winning_map_is_verified_over_every_reply"
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
+        "test_a_winning_map_is_verified_over_every_reply",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells"
       ],
       "cap ignored": ["test_a_walk_past_the_cap_is_rejected"],
-      "empty cells free": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
-      "oversized map accepted": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
+      "empty cells free": [
+        "test_a_map_is_one_bit_per_empty_cell_plus_its_levels",
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
+      "oversized map accepted": [
+        "test_a_map_is_one_bit_per_empty_cell_plus_its_levels",
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
       "simplify drops unverified": [
+        "test_simplify_drops_a_second_phase_the_win_does_not_need",
         "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_simplify_uses_the_given_verifier"
       ],
@@ -424,6 +508,7 @@
         "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels4-4]"
       ],
       "lowest ties by default": [
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
         "test_an_order_needs_ties_to_break",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
@@ -567,8 +652,49 @@
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_only_the_deciding_level_is_ordered",
         "test_with_tactics_the_lowest_breaks_what_is_left"
+      ],
+      "a second phase dropped unverified": [
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells"
+      ],
+      "a second phase never dropped": ["test_simplify_drops_a_second_phase_the_win_does_not_need"],
+      "second phase from a stone past the switch": [
+        "test_a_switched_map_reads_its_first_levels_before_the_switch_and_its_second_from_it",
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells"
+      ],
+      "second phase never read": [
+        "test_a_switched_map_reads_its_first_levels_before_the_switch_and_its_second_from_it",
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells"
+      ],
+      "the phase read before the facts": [
+        "test_a_switched_map_reads_its_first_levels_before_the_switch_and_its_second_from_it",
+        "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
+        "test_simplify_keeps_a_needed_second_phase_and_drops_its_unneeded_cells"
+      ],
+      "phase cells unmapped": ["test_a_second_phase_s_cells_are_kept_apart_from_the_first_s"],
+      "restrict drops the switch": [
+        "test_restricting_a_map_keeps_both_phases_cells_that_are_empty_and_the_switch"
+      ],
+      "restrict drops the second phase": [
+        "test_restricting_a_map_keeps_both_phases_cells_that_are_empty_and_the_switch"
+      ],
+      "a second phase without its switch accepted": [
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
+      "an oversized second phase accepted": [
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
+      "the switch free": [
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
+      "the second phase's bitmap free": [
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
+      ],
+      "the second phase's levels free": [
+        "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
       ]
     }
   },
-  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed)). 'losses before wins' (ranking a tie by losing in two before winning in two orders the moves the same way: a move winning by force in two never loses by force in two, so the three classes keep their order); 'an answer ending the game leaves no win in two' (a finished game has no legal moves, so it leaves no immediate win either way (the check was removed))."
+  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed)). 'losses before wins' (ranking a tie by losing in two before winning in two orders the moves the same way: a move winning by force in two never loses by force in two, so the three classes keep their order); 'an answer ending the game leaves no win in two' (a finished game has no legal moves, so it leaves no immediate win either way (the check was removed)). For phases: 'the switch dropped alone in simplify' (simplify tries dropping the second phase whole first; dropping only the switch plays as that does, so it can never succeed where the whole drop failed — the cell loop skips the switch to save that walk); 'the second phase reads the switch key' (the switch's own key maps to -1, never a cell)."
 }

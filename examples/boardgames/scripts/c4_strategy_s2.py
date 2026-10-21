@@ -22,7 +22,8 @@ several safe moves, those leaving the opponent at most one reply that stops an i
 are (off by default; harness.floor_l4), and "unlevelled" whether the safe moves on cells a map leaves without a
 level are passed over ("none", the default) or read as a last level ("last"; harness.floor_l5), and "order"
 which move a deciding level holding several plays ("lowest", the default, or "tactics" — first a move that wins by
-force in two, then one that does not lose by force in two; harness.floor_l6).
+force in two, then one that does not lose by force in two; harness.floor_l6), and "phases" whether a map may switch
+to second levels from a number of stones on (off by default; harness.floor_k1).
 A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
@@ -71,7 +72,7 @@ def build_one(job: dict) -> dict:
     from harness.steady_exceptions import choose_with, needed
     from harness.steady_local import local_search
     from harness.steady_search import find_steady_state
-    from harness.steady_state import Facts, verify
+    from harness.steady_state import Facts, restrict, verify
     from harness.strategy_builder import Builder, check
     from harness.winning_cache import CachedWinning
 
@@ -90,7 +91,8 @@ def build_one(job: dict) -> dict:
 
         def search(st, start, seconds):
             r = local_search(facts, st, b["n_levels"], b["level_bits"], winning, rng,
-                             s["seconds"] if seconds is None else seconds, s["cap"], start, walker)
+                             s["seconds"] if seconds is None else seconds, s["cap"], start, walker,
+                             phases=b.get("phases", False))
             return None if r["bits"] is None else {k: r[k] for k in ("levels", "exceptions", "own_positions")}
     else:
         winning = lambda states: _winning(game, states)
@@ -103,7 +105,7 @@ def build_one(job: dict) -> dict:
     library = [({int(c): k for c, k in levels.items()}, empty) for levels, empty in job.get("library", [])]
     builder = Builder(facts, winning, search, b["n_levels"], b["level_bits"], b["cap"], b["min_leaf_depth"],
                       b["reuse_window"], b["seconds"], b.get("accept"), b.get("budgets"), library, verifier,
-                      choose_by_size=b.get("choose_by_size", False))
+                      choose_by_size=b.get("choose_by_size", False), phases=b.get("phases", False))
     t0 = time.time()
     complete = builder.build(root)
     improved = None
@@ -138,8 +140,7 @@ def build_one(job: dict) -> dict:
     for k, n in builder.nodes.items():
         if "leaf" in n and (n["leaf"] != 0 or n.get("exceptions")):
             st = states[k]
-            empty = set(facts.empty_cells(st))
-            levels = {c: v for c, v in builder.maps[n["leaf"]].items() if c in empty}
+            levels = restrict(builder.maps[n["leaf"]], facts.empty_cells(st))
             exc = n.get("exceptions", {})
             cert = certify(game, st, 0, lambda xs, lv=levels, ex=exc: [choose_with(facts, x, lv, b["n_levels"], ex)
                                                                         for x in xs],

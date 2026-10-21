@@ -11,7 +11,7 @@ import pytest
 from games.tictactoe import TicTacToe, TTTState
 from harness.steady_exceptions import needed, verify_with
 from harness.steady_local import leaf_bits, local_search
-from harness.steady_state import Facts, verify
+from harness.steady_state import SWITCH, Facts, phase_cell, verify
 
 GAME = TicTacToe()
 
@@ -207,3 +207,123 @@ def test_the_default_walk_is_the_python_reference():
 
     assert inspect.signature(sl.local_search).parameters["walker"].default is needed
     assert inspect.signature(sl.leaf_bits).parameters["walker"].default is needed
+
+
+def test_with_phases_a_search_returns_a_leaf_that_verifies_and_takes_a_second_phase_it_starts_from():
+    facts = Facts(GAME)
+    r = local_search(facts, EARLY, 1, 1, _winning, random.Random(0), seconds=2.0, cap=100_000, phases=True)
+    assert verify_with(facts, EARLY, r["levels"], 1, r["exceptions"], 100_000)["won"]
+    two = {3: 0, SWITCH: 4, phase_cell(4): 0}
+    r = local_search(facts, EARLY, 1, 1, _winning, random.Random(0), seconds=2.0, cap=100_000, start=two, phases=True)
+    assert r["status"] == "found" and r["levels"] == two and r["evaluations"] == 1
+    assert r["bits"] == leaf_bits(facts, EARLY, two, 1, 1, _winning, 100_000)["bits"]
+
+
+def test_without_phases_a_search_never_switches():
+    r = local_search(Facts(GAME), EARLY, 1, 1, _winning, random.Random(0), seconds=1.0, cap=100_000)
+    assert SWITCH not in r["levels"] and all(c >= 0 for c in r["levels"])
+
+
+class _Phases:
+    """A scripted rng for phase moves: `random()` from a list, `randrange` and `choice` from lists."""
+
+    def __init__(self, draws, ranges, cells=(5,)):
+        self.draws, self.ranges, self.cells = list(draws), list(ranges), list(cells)
+
+    def random(self):
+        return self.draws.pop(0) if len(self.draws) > 1 else self.draws[0]
+
+    def randrange(self, n):
+        value = self.ranges.pop(0) if len(self.ranges) > 1 else self.ranges[0]
+        assert 0 <= value < n
+        return value
+
+    def choice(self, seq):
+        return self.cells.pop(0) if len(self.cells) > 1 else self.cells[0]
+
+
+def _tried(monkeypatch):
+    import harness.steady_local as sl
+
+    trials = []
+
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
+        trials.append(dict(levels))
+        return {"bits": 50, "exceptions": {"x": 1}, "own_positions": 1}
+
+    monkeypatch.setattr(sl, "leaf_bits", fake)
+    return trials
+
+
+def test_switching_on_copies_the_first_phase_with_a_switch_past_the_root_s_stones(monkeypatch):
+    trials = _tried(monkeypatch)
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.0], [2]), seconds=0.05, cap=10_000, start={4: 1},
+                 phases=True)
+    assert trials[1] == {4: 1, SWITCH: 4 + 1 + 2, phase_cell(4): 1}
+
+
+def test_a_switch_moves_or_its_phase_is_dropped(monkeypatch):
+    trials = _tried(monkeypatch)
+    start = {4: 1, SWITCH: 6, phase_cell(5): 0}
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.0, 0.0, 0.9], [0]), seconds=0.05, cap=10_000,
+                 start=start, phases=True)
+    assert trials[1] == {4: 1, SWITCH: 5, phase_cell(5): 0}
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.0, 0.9], [0]), seconds=0.05, cap=10_000,
+                 start=start, phases=True)
+    assert {4: 1} in trials
+
+
+def test_with_a_switch_a_level_goes_to_either_phase(monkeypatch):
+    trials = _tried(monkeypatch)
+    start = {4: 1, SWITCH: 6}
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.9, 0.0], [0], cells=[5]), seconds=0.05, cap=10_000,
+                 start=start, phases=True)
+    assert trials[1] == {4: 1, SWITCH: 6, phase_cell(5): 0}
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.9, 0.9], [0], cells=[5]), seconds=0.05, cap=10_000,
+                 start=start, phases=True)
+    assert {4: 1, SWITCH: 6, 5: 0} in trials
+
+
+def test_without_a_switch_a_level_goes_to_the_first_phase(monkeypatch):
+    trials = _tried(monkeypatch)
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.9, 0.0], [0], cells=[5]), seconds=0.05, cap=10_000,
+                 start={4: 1}, phases=True)
+    assert trials[1] == {4: 1, 5: 0}
+
+
+
+
+@pytest.mark.parametrize("extra,taken", [(8, True), (9, False)])
+def test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size(monkeypatch, extra,
+                                                                                          taken):
+    """FORK has 5 empty cells: a second phase costs a 3-bit switch and a 5-bit bitmap before any level."""
+    import harness.steady_local as sl
+
+    trials = []
+
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
+        trials.append(dict(levels))
+        return {"bits": 50 + (extra if SWITCH in levels else 0), "exceptions": {"x": 1}, "own_positions": 1}
+
+    monkeypatch.setattr(sl, "leaf_bits", fake)
+    r = local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.0, 0.9], [2], cells=[5]), seconds=0.05,
+                     cap=10_000, start={4: 1}, phases=True)
+    assert (SWITCH in trials[2]) is taken and r["levels"] == {4: 1} and r["bits"] == 50
+
+
+
+@pytest.mark.parametrize("one_phase,dropped", [(51, False), (50, True)])
+def test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap(monkeypatch, one_phase,
+                                                                                        dropped):
+    import harness.steady_local as sl
+
+    trials = []
+
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
+        trials.append(dict(levels))
+        return {"bits": 58 if SWITCH in levels else one_phase, "exceptions": {"x": 1}, "own_positions": 1}
+
+    monkeypatch.setattr(sl, "leaf_bits", fake)
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Phases([0.0, 0.9], [0], cells=[5]), seconds=0.05, cap=10_000,
+                 start={4: 1, SWITCH: 6, phase_cell(4): 1}, phases=True)
+    assert trials[1] == {4: 1} and (SWITCH in trials[2]) is not dropped

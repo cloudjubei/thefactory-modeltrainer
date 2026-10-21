@@ -1,0 +1,110 @@
+{
+  "file": "harness/floor_k0.py",
+  "tests": ["tests/test_floor_k0.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "another source",
+      "old": "\"source\": \"c49_l6.json.gz\", \"roots\"",
+      "new": "\"source\": \"c49_l5.json.gz\", \"roots\""
+    },
+    {
+      "name": "the light sixteen",
+      "old": "\"roots\": L4[\"indices\"][:16]",
+      "new": "\"roots\": L4[\"indices\"][16:]"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": 2,",
+      "new": "\"support\": 1.5,"
+    },
+    {
+      "name": "fewer differing suffice",
+      "old": "\"min_differ\": 10}",
+      "new": "\"min_differ\": 9}"
+    },
+    {
+      "name": "unfingerprinted judged",
+      "old": "e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"] or ",
+      "new": ""
+    },
+    {
+      "name": "other source judged",
+      "old": " or e.get(\"source\") != spec[\"source\"]",
+      "new": ""
+    },
+    {
+      "name": "missing roots judged",
+      "old": "\n            or sorted({r[\"root\"] for r in e[\"rows\"]}) != sorted(set(spec[\"roots\"]) - {297})",
+      "new": ""
+    },
+    {
+      "name": "no leaf counts as nothing",
+      "old": "math.inf if arm[\"bits\"] is None else",
+      "new": "0 if arm[\"bits\"] is None else"
+    },
+    {
+      "name": "support boundary",
+      "old": "smaller >= spec[\"support\"] * larger",
+      "new": "smaller > spec[\"support\"] * larger"
+    },
+    {
+      "name": "refute boundary",
+      "old": "\"refuted\" if smaller <= larger",
+      "new": "\"refuted\" if smaller < larger"
+    },
+    {
+      "name": "min-differ boundary",
+      "old": "if smaller + larger < spec[\"min_differ\"]:",
+      "new": "if smaller + larger <= spec[\"min_differ\"]:"
+    },
+    {
+      "name": "ties counted as smaller",
+      "old": "if size(r[\"two\"]) < size(r[\"one\"]))",
+      "new": "if size(r[\"two\"]) <= size(r[\"one\"]))"
+    },
+    {
+      "name": "switched miscounted",
+      "old": "if r[\"two\"][\"switched\"])",
+      "new": "if r[\"one\"][\"switched\"])"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-21T08:52:11+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "another source": [
+        "test_another_measurement_is_not_judged",
+        "test_k0_searches_l6_s_heavy_splits"
+      ],
+      "the light sixteen": [
+        "test_a_search_with_no_leaf_is_larger_than_any",
+        "test_k0_searches_l6_s_heavy_splits",
+        "test_too_few_differing_positions_cannot_judge",
+        "test_twice_as_often_smaller_supports_and_no_more_often_refutes"
+      ],
+      "a looser support": [
+        "test_k0_searches_l6_s_heavy_splits",
+        "test_twice_as_often_smaller_supports_and_no_more_often_refutes"
+      ],
+      "fewer differing suffice": [
+        "test_k0_searches_l6_s_heavy_splits",
+        "test_too_few_differing_positions_cannot_judge"
+      ],
+      "unfingerprinted judged": ["test_another_measurement_is_not_judged"],
+      "other source judged": ["test_another_measurement_is_not_judged"],
+      "missing roots judged": ["test_another_measurement_is_not_judged"],
+      "no leaf counts as nothing": ["test_a_search_with_no_leaf_is_larger_than_any"],
+      "support boundary": ["test_twice_as_often_smaller_supports_and_no_more_often_refutes"],
+      "refute boundary": ["test_twice_as_often_smaller_supports_and_no_more_often_refutes"],
+      "min-differ boundary": ["test_too_few_differing_positions_cannot_judge"],
+      "ties counted as smaller": [
+        "test_a_search_with_no_leaf_is_larger_than_any",
+        "test_too_few_differing_positions_cannot_judge",
+        "test_twice_as_often_smaller_supports_and_no_more_often_refutes"
+      ],
+      "switched miscounted": ["test_twice_as_often_smaller_supports_and_no_more_often_refutes"]
+    }
+  }
+}

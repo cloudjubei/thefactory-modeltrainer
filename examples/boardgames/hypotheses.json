@@ -8790,10 +8790,17 @@
       "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_28_of_32_complete_within_2_hours_breaking_ties_by_tactics",
       "note": "User's choice (2026-10-21): another zero-bit rule; chosen by D1 (h297: tactics misses 200 of 4,523 sampled leaf positions against the lowest's 308). L6 = L5's rule and pipeline, no library, with a deciding level's ties broken by tactics (Facts order 'tactics': first a move that wins by force in two, then one that does not lose by force in two, else the lowest); 30-s searches, 20-min root, 2-h cap, accept 30 unchanged. Positions: L4's 32 (F1's 16 heaviest + 16 spread). Judged against L5 (109,017 bits, 32/32 complete) under L5's own registration. Run-to-run swing ~10% (h282). Mutants: steady_state 58, c4leafwalk 54, native_leaf 21, floor_l6 5 \u2014 all killed. Full suite green (3,150 passed). Fingerprint ce56e01571bb.",
       "registered_at": "2026-10-21T00:52:24.830415+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_28_of_32_complete_within_2_hours_breaking_ties_by_tactics",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.27s",
+          "drawn_at": "2026-10-21T07:44:46.767380+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_l6.json.gz",
-        "started": null
+        "started": "2026-10-21T00:52:59+00:00"
       },
       "pins": {
         "tests/test_c49_l6_evidence.py": "dd009551467dc4fa9d97c19a47e30e4d735eba0fb976090cca4125931ac47eb8",
@@ -8812,11 +8819,19 @@
       "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller",
       "note": "User's choice (2026-10-21): another zero-bit rule; chosen by D1 (h297: tactics misses 200 of 4,523 sampled leaf positions against the lowest's 308). L6 = L5's rule and pipeline, no library, with a deciding level's ties broken by tactics (Facts order 'tactics': first a move that wins by force in two, then one that does not lose by force in two, else the lowest); 30-s searches, 20-min root, 2-h cap, accept 30 unchanged. Positions: L4's 32 (F1's 16 heaviest + 16 spread). Judged against L5 (109,017 bits, 32/32 complete) under L5's own registration. Run-to-run swing ~10% (h282). Mutants: steady_state 58, c4leafwalk 54, native_leaf 21, floor_l6 5 \u2014 all killed. Full suite green (3,150 passed). Fingerprint ce56e01571bb.",
       "registered_at": "2026-10-21T00:52:25.070134+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "   - supported\nE         + inconclusive\n\ntests/test_c49_l6_evidence.py:41: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller\n1 failed in 0.31s",
+          "drawn_at": "2026-10-21T07:44:47.446265+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": [
         {
           "path": "evidence/c49_l6.json.gz",
-          "started": null
+          "started": "2026-10-21T00:52:59+00:00"
         },
         {
           "path": "evidence/c49_l5.json.gz",
@@ -8831,7 +8846,12 @@
         "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
         "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
       },
-      "inconclusive_proof": "tests/test_c49_l6_evidence.py::test_c49_l6_the_size_is_undecidable"
+      "inconclusive_proof": "tests/test_c49_l6_evidence.py::test_c49_l6_the_size_is_undecidable",
+      "supersession": {
+        "by": "h300",
+        "reason": "Same claim and proof; h299 declared L5's evidence (produced 2026-10-16, the comparison) as data too, which times it after the data. h300 declares only the L6 run, as A6's h295 did.",
+        "at": "2026-10-21T07:45:00.827339+00:00"
+      }
     },
     "h300": {
       "id": "h300",
@@ -8840,10 +8860,18 @@
       "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller",
       "note": "Replaces h299, registered a minute earlier with the same claim but L5's evidence (produced 2026-10-16, the comparison, not the measurement) declared as its data too, which would time h299 as after the data; supersede h299 by h300 once h300 has evidence. Data: the L6 run only, as A6's h295. Otherwise as h298: L6 = L5's rule and pipeline with ties broken by tactics (Facts order 'tactics'), L4's 32 positions, against L5 (109,017 bits, 32/32) under L5's own registration. Fingerprint ce56e01571bb.",
       "registered_at": "2026-10-21T00:52:52.917484+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "   - supported\nE         + inconclusive\n\ntests/test_c49_l6_evidence.py:41: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l6_evidence.py::test_c49_l6_breaking_ties_by_tactics_makes_the_strategies_a_tenth_smaller\n1 failed in 0.17s",
+          "drawn_at": "2026-10-21T07:44:48.603231+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_l6.json.gz",
-        "started": null
+        "started": "2026-10-21T00:52:59+00:00"
       },
       "pins": {
         "tests/test_c49_l6_evidence.py": "dd009551467dc4fa9d97c19a47e30e4d735eba0fb976090cca4125931ac47eb8",
@@ -8854,6 +8882,153 @@
         "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
       },
       "inconclusive_proof": "tests/test_c49_l6_evidence.py::test_c49_l6_the_size_is_undecidable"
+    },
+    "h301": {
+      "id": "h301",
+      "claim": "\u00a73.6 L6 (registered after the data): breaking ties by tactics trades maps for exceptions and helps the light positions, not the heavy tail \u2014 424 leaves need no map against 281, maps fall 784 -> 699 (59,697 -> 52,122 bits) but exceptions rise 2,262 -> 2,656 (28,764 -> 32,407 bits); F1's 16 heaviest of the 32 take 94,250 bits against 96,913 (0.97), the other 16 take 8,039 against 12,104 (0.66). Smaller on 19, larger on 11, 2 tied (sign test p = 0.2): the whole, 0.94, is not told apart from run-to-run swing",
+      "mode": "test",
+      "proof": "tests/test_c49_l6_after_evidence.py::test_c49_l6_tactics_trade_maps_for_exceptions_and_help_the_light_positions_not_the_heavy_tail",
+      "note": "h298 supported (32/32 complete), h300 inconclusive (102,289 against 109,017 = 0.938; refuted only at 1.0, supported at 0.9) \u2014 pre-registered; h299 superseded by h300. Builds took 25.5 CPU-hours against L5's 23.5. D1's 35% fewer default misses (h297) did not carry into a comparably smaller strategy.",
+      "registered_at": "2026-10-21T07:45:24.056028+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l6_after_evidence.py::test_c49_l6_tactics_trade_maps_for_exceptions_and_help_the_light_positions_not_the_heavy_tail",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-21T07:45:24.705113+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l6.json.gz",
+          "started": "2026-10-21T00:52:59+00:00"
+        },
+        {
+          "path": "evidence/c49_l5.json.gz",
+          "started": "2026-10-16T20:54:12+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l6_after_evidence.py": "8879b28ad0c5d42ab51bf63c690da098021142ee49ea6bd91aaeb75fc1869f89"
+      }
+    },
+    "h302": {
+      "id": "h302",
+      "claim": "\u00a73.6 K0: at up to 3 positions per root (seed 0) where L6's strategies for F1's 16 heaviest of L4's 32 split, the 30-s local leaf search with two-phase maps allowed (a switch to second levels from a number of stones on, paid in bits) finds a smaller leaf at least twice as often as a larger one than the same search, same seed, without them. Refuted when smaller no more often than larger; undecidable with fewer than 10 differing",
+      "mode": "test",
+      "proof": "tests/test_c49_k0_evidence.py::test_c49_k0_two_phase_searches_find_smaller_leaves_twice_as_often_as_larger",
+      "note": "User's choice (2026-10-21): richer leaves, paid in bits (two-phase maps). A pilot before K1's build: a 10-min smoke of #324 with and without phases, both unfinished at the cap, kept no two-phase map \u2014 so the mechanism is measured first. Search judges a change without the fixed cost of having a second phase, keeps the best by its whole size. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k0 13, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 54d2441217fd.",
+      "registered_at": "2026-10-21T10:34:13.003135+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k0_evidence.py::test_c49_k0_two_phase_searches_find_smaller_leaves_twice_as_often_as_larger",
+          "ok": false,
+          "detail": " - supported\nE         + inconclusive\n\ntests/test_c49_k0_evidence.py:27: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_k0_evidence.py::test_c49_k0_two_phase_searches_find_smaller_leaves_twice_as_often_as_larger\n1 failed in 0.05s",
+          "drawn_at": "2026-10-21T10:45:26.131341+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_k0.json.gz",
+        "started": "2026-10-21T10:34:17.197638+00:00"
+      },
+      "pins": {
+        "tests/test_c49_k0_evidence.py": "851d01d9dec81f1f95416f80d9fffcf9a50ee995c00c27963544cbcba4b03260",
+        "harness/floor_k0.py": "471b52ab04c2dfca267dd4b07bf6e18d0cbb789df39204abebed6603afd496c0"
+      },
+      "inconclusive_proof": "tests/test_c49_k0_evidence.py::test_c49_k0_the_sign_is_undecidable"
+    },
+    "h303": {
+      "id": "h303",
+      "claim": "\u00a73.6 K0 (registered after the data): two-phase maps help the 30-s leaf search only on leaves far too large to keep \u2014 over the 43 positions where both searches found a leaf the two-phase leaves total 976,657 bits against 1,832,901, but the gap is a few leaves of tens to hundreds of thousands of bits; on the 26 where the one-phase leaf is under 5,000 bits the two-phase one is larger on 17 and smaller on 4 (24,160 bits against 15,904). The 5,000-bit cut was chosen after seeing the data",
+      "mode": "test",
+      "proof": "tests/test_c49_k0_after_evidence.py::test_c49_k0_two_phase_maps_help_only_on_leaves_far_too_large_to_keep",
+      "note": "h302 inconclusive (20 smaller, 18 larger; median ratio 1.0) \u2014 pre-registered. 11 of 45 two-phase searches ended on a switched map. On the huge leaves the two-phase search also made more evaluations in its 30 s (its walks with fewer exceptions run faster), so part of that gap is search speed, not the language.",
+      "registered_at": "2026-10-21T10:46:01.022929+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k0_after_evidence.py::test_c49_k0_two_phase_maps_help_only_on_leaves_far_too_large_to_keep",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-21T10:46:01.231201+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_k0.json.gz",
+        "started": "2026-10-21T10:34:17.197638+00:00"
+      },
+      "pins": {
+        "tests/test_c49_k0_after_evidence.py": "b503646edc3e36f895a19c9bdba8043f436a0e9930e01e77b0d4b2c4b8f3c2d3"
+      }
+    },
+    "h304": {
+      "id": "h304",
+      "claim": "\u00a73.6 K1: with two-phase maps allowed (a switch to second levels from a number of stones on, paid in bits), at least 28 of L4's 32 positions get a complete certified strategy within 2 hours under L6's rule and pipeline. Refuted at 24 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_28_of_32_complete_within_2_hours_with_two_phase_maps",
+      "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
+      "registered_at": "2026-10-21T14:55:18.761079+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_k1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_k1_evidence.py::test_c49_k1_completion_is_undecidable"
+    },
+    "h305": {
+      "id": "h305",
+      "claim": "\u00a73.6 K1: with two-phase maps allowed, the strategies for L4's 32 positions take no more than nine tenths of L6's 102,289 bits. Refuted at L6's bits or more (an unfinished root counts at its partial size)",
+      "mode": "test",
+      "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_strategies_a_tenth_smaller",
+      "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
+      "registered_at": "2026-10-21T14:55:19.063849+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_k1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_k1_evidence.py::test_c49_k1_the_size_is_undecidable"
+    },
+    "h306": {
+      "id": "h306",
+      "claim": "\u00a73.6 K1: with two-phase maps allowed, the strategies for F1's 16 heaviest of L4's 32 positions take no more than nine tenths of L6's 94,250 bits on the same 16. Refuted at L6's bits or more (an unfinished root counts at its partial size)",
+      "mode": "test",
+      "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_heavy_sixteen_a_tenth_smaller",
+      "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
+      "registered_at": "2026-10-21T14:55:20.061581+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_k1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_k1_evidence.py::test_c49_k1_the_heavy_size_is_undecidable"
     }
   }
 }

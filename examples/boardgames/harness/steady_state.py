@@ -8,6 +8,10 @@ move there, after WeakC4 (2swap; https://2swap.github.io/WeakC4/explanation/). T
      exactly one safe move; a level holding none or several is passed over;
   4. otherwise the rule has no move: it is undefined there.
 
+A map may have two phases: its levels on cells (keys 0 and up) are read before a SWITCH — a number of stones on the
+board — and its second levels (on keys `phase_cell(cell)`, -2 and down) from the switch on. A map without a switch has
+one phase.
+
 A move's cell is read from the game's own observation (the one board cell it fills), so the language knows nothing
 about any particular game; it applies to placement games, where every move fills exactly one cell.
 
@@ -23,6 +27,24 @@ import time
 TIES = ("exact", "lowest")
 UNLEVELLED = ("none", "last")
 ORDERS = ("lowest", "tactics")
+SWITCH = -1
+
+
+def phase_cell(cell: int) -> int:
+    """The key a map's second phase levels `cell` under."""
+    return -cell - 2
+
+
+def restrict(levels: dict, empty) -> dict:
+    """`levels` on the cells in `empty` (both phases), its switch kept."""
+    empty = set(empty)
+    return {c: k for c, k in levels.items() if c == SWITCH or (c if c >= 0 else phase_cell(c)) in empty}
+
+
+def _phase(facts, state, levels: dict) -> dict:
+    if SWITCH in levels and facts.cells - len(facts.empty_cells(state)) >= levels[SWITCH]:
+        return {phase_cell(c): k for c, k in levels.items() if c < SWITCH}
+    return levels
 
 
 class Facts:
@@ -178,14 +200,15 @@ class Facts:
 
 
 def choose(facts: Facts, state, levels: dict, n_levels: int):
-    """The rule's move at `state` under the priority map `levels` ({cell: level}), or None where it is undefined: a
-    winning move; else the only safe move; else the first level that decides (`facts.ties`), its move by `facts.order` —
-    the safe moves on unlevelled cells a last level when `facts.unlevelled` is "last"."""
+    """The rule's move at `state` under the priority map `levels` ({cell: level}, in the phase `state` is in), or None
+    where it is undefined: a winning move; else the only safe move; else the first level that decides (`facts.ties`),
+    its move by `facts.order` — the safe moves on unlevelled cells a last level when `facts.unlevelled` is "last"."""
     wins, safe, cell = facts.of(state)
     if wins:
         return min(wins)
     if len(safe) == 1:
         return safe[0]
+    levels = _phase(facts, state, levels)
     for k in range(n_levels):
         at = [a for a in safe if levels.get(cell[a]) == k]
         if len(at) == 1 or (at and facts.ties == "lowest"):
@@ -238,20 +261,32 @@ def verify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000
 
 
 def map_bits(levels: dict, empty: int, level_bits: int) -> int:
-    """The map's size: one bit per cell empty at its position (levelled or not) and `level_bits` per levelled cell."""
-    if len(levels) > empty:
-        raise ValueError(f"{len(levels)} levelled cells cannot exceed the {empty} empty cells")
-    return empty + level_bits * len(levels)
+    """The map's size: one bit per cell empty at its position (levelled or not) and `level_bits` per levelled cell —
+    and for a second phase the same again, plus its switch as stones past the position's (1..empty)."""
+    first = [c for c in levels if c >= 0]
+    second = [c for c in levels if c < SWITCH]
+    if second and SWITCH not in levels:
+        raise ValueError("a map's second phase needs its switch")
+    if max(len(first), len(second)) > empty:
+        raise ValueError(f"{max(len(first), len(second))} levelled cells cannot exceed the {empty} empty cells")
+    bits = empty + level_bits * len(first)
+    if SWITCH in levels:
+        bits += max(0, (empty - 1).bit_length()) + empty + level_bits * len(second)
+    return bits
 
 
 def simplify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000,
              deadline: float | None = None, verifier=None) -> dict:
-    """Drop every level the rule does not need: each levelled cell in turn is cleared and kept cleared if the map
-    still verifies (by `verifier`, `verify` by default). The result verifies whenever the input did; past `deadline`
-    the remaining levels are kept."""
+    """Drop every level the rule does not need: a second phase first, whole (its switch and its levels), then each
+    levelled cell of either phase in turn is cleared and kept cleared if the map still verifies (by `verifier`,
+    `verify` by default). The result verifies whenever the input did; past `deadline` the remaining levels are kept."""
     check = verifier or verify
     kept = dict(levels)
-    for cell in sorted(levels):
+    if SWITCH in kept:
+        trial = {c: k for c, k in kept.items() if c >= 0}
+        if check(facts, root, trial, n_levels, cap, deadline=deadline)["won"]:
+            kept = trial
+    for cell in sorted(c for c in kept if c != SWITCH):
         trial = {c: k for c, k in kept.items() if c != cell}
         if check(facts, root, trial, n_levels, cap, deadline=deadline)["won"]:
             kept = trial

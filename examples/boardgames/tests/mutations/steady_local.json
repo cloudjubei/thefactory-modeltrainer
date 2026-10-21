@@ -20,12 +20,12 @@
     },
     {
       "name": "ties rejected",
-      "old": "        if _cost(leaf) <= _cost(now):",
-      "new": "        if _cost(leaf) < _cost(now):"
+      "old": "        if _cost(leaf) - (phase if SWITCH in trial else 0) <= _cost(now) - (phase if SWITCH in current else 0):",
+      "new": "        if _cost(leaf) - (phase if SWITCH in trial else 0) < _cost(now) - (phase if SWITCH in current else 0):"
     },
     {
       "name": "worse changes taken",
-      "old": "        if _cost(leaf) <= _cost(now):",
+      "old": "        if _cost(leaf) - (phase if SWITCH in trial else 0) <= _cost(now) - (phase if SWITCH in current else 0):",
       "new": "        if True:"
     },
     {
@@ -40,8 +40,8 @@
     },
     {
       "name": "levels never cleared",
-      "old": "        if level == n_levels:\n            trial.pop(cell, None)",
-      "new": "        if False:\n            trial.pop(cell, None)"
+      "old": "            if level == n_levels:\n                trial.pop(cell, None)",
+      "new": "            if False:\n                trial.pop(cell, None)"
     },
     {
       "name": "found with exceptions",
@@ -82,11 +82,61 @@
       "name": "search walk not passed on",
       "old": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline, walker)",
       "new": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline)"
+    },
+    {
+      "name": "a trial's second phase charged",
+      "old": "        if _cost(leaf) - (phase if SWITCH in trial else 0) <= _cost(now) - (phase if SWITCH in current else 0):",
+      "new": "        if _cost(leaf) - 0 <= _cost(now) - (phase if SWITCH in current else 0):"
+    },
+    {
+      "name": "the current second phase charged",
+      "old": "        if _cost(leaf) - (phase if SWITCH in trial else 0) <= _cost(now) - (phase if SWITCH in current else 0):",
+      "new": "        if _cost(leaf) - (phase if SWITCH in trial else 0) <= _cost(now) - 0:"
+    },
+    {
+      "name": "phase cost with its bitmap twice",
+      "old": "    phase = map_bits({SWITCH: stones + 1}, len(cells), level_bits) - len(cells)",
+      "new": "    phase = map_bits({SWITCH: stones + 1}, len(cells), level_bits)"
+    },
+    {
+      "name": "phase moves never made",
+      "old": "        if phases and len(cells) > 1 and rng.random() < SWITCH_SHARE:",
+      "new": "        if False:"
+    },
+    {
+      "name": "second phase never levelled",
+      "old": "            if phases and SWITCH in current and rng.random() < 0.5:",
+      "new": "            if False:"
+    },
+    {
+      "name": "switching on at the root's stones",
+      "old": "        return {**first, SWITCH: stones + 1 + rng.randrange(empty - 1),",
+      "new": "        return {**first, SWITCH: stones + rng.randrange(empty - 1),"
+    },
+    {
+      "name": "moving to the root's stones",
+      "old": "        return {**levels, SWITCH: stones + 1 + rng.randrange(empty - 1)}",
+      "new": "        return {**levels, SWITCH: stones + rng.randrange(empty - 1)}"
+    },
+    {
+      "name": "switching on starts empty",
+      "old": "                **{phase_cell(c): k for c, k in first.items()}}",
+      "new": "}"
+    },
+    {
+      "name": "a switch is never dropped",
+      "old": "    if rng.random() < 0.5:\n        return {**levels, SWITCH",
+      "new": "    if True:\n        return {**levels, SWITCH"
+    },
+    {
+      "name": "dropping keeps the second phase's cells",
+      "old": "    return {c: k for c, k in levels.items() if c >= 0}\n\n\ndef local",
+      "new": "    return {c: k for c, k in levels.items() if c != SWITCH}\n\n\ndef local"
     }
   ],
   "last_run": {
-    "at": "2026-10-08T21:14:45+00:00",
-    "killed": 16,
+    "at": "2026-10-21T08:39:45+00:00",
+    "killed": 26,
     "survived": [],
     "killed_by": {
       "map bits dropped": [
@@ -102,22 +152,36 @@
         "test_the_walk_can_be_replaced_and_receives_every_argument"
       ],
       "capped leaf costs nothing": ["test_a_capped_change_is_never_taken"],
-      "ties rejected": ["test_an_equal_sized_change_is_taken"],
+      "ties rejected": [
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[8-True]",
+        "test_an_equal_sized_change_is_taken",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]"
+      ],
       "worse changes taken": [
         "test_a_capped_change_is_never_taken",
-        "test_a_change_that_grows_the_leaf_is_rejected"
+        "test_a_change_that_grows_the_leaf_is_rejected",
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[9-False]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]"
       ],
       "best replaced by ties": ["test_the_best_leaf_is_kept_when_later_changes_only_tie"],
       "stops at the first sized leaf": [
         "test_a_capped_change_is_never_taken",
         "test_a_change_that_grows_the_leaf_is_rejected",
         "test_a_level_that_blocks_the_win_can_be_cleared",
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[8-True]",
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[9-False]",
+        "test_a_switch_moves_or_its_phase_is_dropped",
         "test_an_equal_sized_change_is_taken",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]",
         "test_every_walk_of_a_search_gets_its_deadline",
         "test_local_search_finds_the_fork_and_the_map_verifies",
         "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies",
+        "test_switching_on_copies_the_first_phase_with_a_switch_past_the_root_s_stones",
         "test_the_best_leaf_is_kept_when_later_changes_only_tie",
-        "test_the_walk_can_be_replaced_and_receives_every_argument"
+        "test_the_walk_can_be_replaced_and_receives_every_argument",
+        "test_with_a_switch_a_level_goes_to_either_phase",
+        "test_without_a_switch_a_level_goes_to_the_first_phase"
       ],
       "levels never cleared": ["test_a_level_that_blocks_the_win_can_be_cleared"],
       "found with exceptions": ["test_the_best_leaf_is_kept_when_later_changes_only_tie"],
@@ -125,7 +189,8 @@
       "timeout given a size": [
         "test_a_capped_walk_is_never_read_as_a_win",
         "test_a_search_out_of_time_mid_walk_has_no_leaf",
-        "test_a_walk_past_the_deadline_has_no_size"
+        "test_a_walk_past_the_deadline_has_no_size",
+        "test_with_phases_a_search_returns_a_leaf_that_verifies_and_takes_a_second_phase_it_starts_from"
       ],
       "first walk ignores the deadline": [
         "test_a_search_out_of_time_mid_walk_has_no_leaf",
@@ -140,10 +205,47 @@
         "test_a_capped_walk_is_never_read_as_a_win",
         "test_a_search_out_of_time_mid_walk_has_no_leaf",
         "test_a_walk_past_the_cap_has_no_size",
-        "test_a_walk_past_the_deadline_has_no_size"
+        "test_a_walk_past_the_deadline_has_no_size",
+        "test_with_phases_a_search_returns_a_leaf_that_verifies_and_takes_a_second_phase_it_starts_from"
       ],
       "leaf walk not the given one": ["test_the_walk_can_be_replaced_and_receives_every_argument"],
-      "search walk not passed on": ["test_the_walk_can_be_replaced_and_receives_every_argument"]
+      "search walk not passed on": ["test_the_walk_can_be_replaced_and_receives_every_argument"],
+      "a trial's second phase charged": [
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[8-True]"
+      ],
+      "the current second phase charged": [
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]"
+      ],
+      "phase cost with its bitmap twice": [
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[9-False]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]"
+      ],
+      "phase moves never made": [
+        "test_a_second_phase_is_judged_without_its_switch_and_bitmap_but_kept_by_its_whole_size[8-True]",
+        "test_a_switch_moves_or_its_phase_is_dropped",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]",
+        "test_switching_on_copies_the_first_phase_with_a_switch_past_the_root_s_stones",
+        "test_with_a_switch_a_level_goes_to_either_phase"
+      ],
+      "second phase never levelled": ["test_with_a_switch_a_level_goes_to_either_phase"],
+      "switching on at the root's stones": [
+        "test_switching_on_copies_the_first_phase_with_a_switch_past_the_root_s_stones"
+      ],
+      "moving to the root's stones": ["test_a_switch_moves_or_its_phase_is_dropped"],
+      "switching on starts empty": [
+        "test_switching_on_copies_the_first_phase_with_a_switch_past_the_root_s_stones"
+      ],
+      "a switch is never dropped": [
+        "test_a_switch_moves_or_its_phase_is_dropped",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]"
+      ],
+      "dropping keeps the second phase's cells": [
+        "test_a_switch_moves_or_its_phase_is_dropped",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[50-True]",
+        "test_dropping_a_second_phase_is_judged_against_the_map_without_its_switch_and_bitmap[51-False]"
+      ]
     }
   }
 }
