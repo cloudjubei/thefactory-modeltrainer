@@ -514,8 +514,10 @@ rule standalone and in decision-list order, by ply.
     positions with several safe moves sampled from L5's certified leaves and solved, the lowest move keeps the win at
     93.2% (random 92.8%); plain reorderings do no better, but "tactics" — first a move that wins by force in two, then
     one that does not lose by force in two, else the lowest — misses 200 against 308 (0.65). It becomes L6's rule.
-  - **L6 (next, user's choice: another zero-bit rule):** L5 with ties broken by tactics (`Facts.order`), on L4's 32
-    positions, against L5 (109,017 bits): ≥28/32 complete; ≤0.9 of L5's bits.
+  - **L6 (h298, h300; running since 2026-10-21 00:53Z, user's choice: another zero-bit rule):** L5 with ties broken
+    by tactics (`Facts.order`), on L4's 32 positions, against L5 (109,017 bits): ≥28/32 complete; ≤0.9 of L5's bits.
+    h299 = h300 registered with L5's file as data too (would read post-hoc) — supersede by h300 once judged. ~8 h.
+    Run files in checkpoints/runs/c49_l6*.
 
 ## 4. The hybrid process — definition of done
 

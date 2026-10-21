@@ -259,11 +259,6 @@
       "new": "            ranks = ({a: (not self._wins_in_two(state, a), False, a) for a in chosen}\n                     if self.order == \"tactics\" and len(chosen) > 1 else {})"
     },
     {
-      "name": "losses before wins",
-      "old": "            ranks = ({a: (not self._wins_in_two(state, a), self._loses_in_two(state, a), a) for a in chosen}\n                     if self.order == \"tactics\" and len(chosen) > 1 else {})",
-      "new": "            ranks = ({a: (self._loses_in_two(state, a), not self._wins_in_two(state, a), a) for a in chosen}\n                     if self.order == \"tactics\" and len(chosen) > 1 else {})"
-    },
-    {
       "name": "tactics end at the highest",
       "old": "            ranks = ({a: (not self._wins_in_two(state, a), self._loses_in_two(state, a), a) for a in chosen}\n                     if self.order == \"tactics\" and len(chosen) > 1 else {})",
       "new": "            ranks = ({a: (not self._wins_in_two(state, a), self._loses_in_two(state, a), -a) for a in chosen}\n                     if self.order == \"tactics\" and len(chosen) > 1 else {})"
@@ -300,9 +295,9 @@
     }
   ],
   "last_run": {
-    "at": "2026-10-20T22:50:06+00:00",
+    "at": "2026-10-21T00:38:11+00:00",
     "killed": 58,
-    "survived": ["losses before wins"],
+    "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
       "win not played first": [
@@ -548,7 +543,6 @@
         "test_tactics_are_worked_out_once_per_position",
         "test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two"
       ],
-      "losses before wins": [],
       "tactics end at the highest": [
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_only_the_deciding_level_is_ordered",
@@ -576,5 +570,5 @@
       ]
     }
   },
-  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed))."
+  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed)). 'losses before wins' (ranking a tie by losing in two before winning in two orders the moves the same way: a move winning by force in two never loses by force in two, so the three classes keep their order); 'an answer ending the game leaves no win in two' (a finished game has no legal moves, so it leaves no immediate win either way (the check was removed))."
 }

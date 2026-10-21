@@ -257,3 +257,4 @@
 {"event": "end", "id": "c54d457e5e04", "status": "completed", "at": "2026-10-20T22:33:00+00:00", "seconds": 137.3}
 {"event": "start", "id": "41be95063d08", "name": "c4_default_accuracy", "argv": ["--spec", "harness.floor_l5", "--targets", "c49_l5.json.gz", "--out", "evidence/c49_d1.json.gz"], "at": "2026-10-20T22:35:08+00:00"}
 {"event": "end", "id": "41be95063d08", "status": "completed", "at": "2026-10-20T22:39:15+00:00", "seconds": 247.1}
+{"event": "start", "id": "33f3a3807f49", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_l6", "--workers", "4", "--out", "evidence/c49_l6.json.gz", "--progress", "checkpoints/runs/c49_l6_progress.json"], "at": "2026-10-21T00:52:59+00:00"}

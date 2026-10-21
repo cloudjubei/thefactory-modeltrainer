@@ -5588,3 +5588,10 @@ lowest's, inside the two thirds registered before the run (h297 supported; floor
 the rule actually tied on, the lowest is right everywhere by construction (the leaves are certified under it), so
 only the all-safe-moves score is read.
 
+L6 launched 2026-10-21 00:53Z: L5 with a deciding level's ties broken by tactics (`Facts.order` "tactics", in Python
+and the C walk, which agree on every rule tested), on L4's 32 positions, judged against L5 (109,017 bits) — h298 (28
+of 32 complete), h300 (nine tenths of L5). h299 is h300's twin registered a minute earlier with L5's file declared as
+data too, which would time it after the data; to be superseded by h300. Mutants: steady_state 58, c4leafwalk 54,
+native_leaf 21, floor_l6 5 — all killed (two equivalent rank swaps dropped with a note; unreachable checks removed from
+wins_in_two). Full suite 3,150 passed. Fingerprint ce56e01571bb. Chain shell PID 86693.
+

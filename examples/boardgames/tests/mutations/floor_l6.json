@@ -10,7 +10,7 @@
     },
     {
       "name": "L5's fingerprint",
-      "old": "\"measurement_fp\": \"2285bc9e9ca8\", ",
+      "old": "\"measurement_fp\": \"ce56e01571bb\", ",
       "new": ""
     },
     {
@@ -30,7 +30,7 @@
     }
   ],
   "last_run": {
-    "at": "2026-10-20T22:49:17+00:00",
+    "at": "2026-10-21T00:52:14+00:00",
     "killed": 5,
     "survived": [],
     "killed_by": {

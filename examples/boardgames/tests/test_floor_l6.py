@@ -19,7 +19,7 @@ def _e(spec, sizes, incomplete=(), **over):
 def test_l6_is_l5_breaking_ties_by_tactics_on_l4_s_positions():
     assert SPEC["indices"] == L4["indices"] and SPEC["roots"] == 32 and "library_from" not in SPEC
     assert SPEC["builder"] == {**L5["builder"], "order": "tactics"} and SPEC["search"] == L5["search"]
-    assert SPEC["measurement_fp"] == "2285bc9e9ca8" != L5["measurement_fp"] and SPEC["support"] == 0.9
+    assert SPEC["measurement_fp"] == "ce56e01571bb" != L5["measurement_fp"] and SPEC["support"] == 0.9
     assert (SPEC["complete_support"], SPEC["complete_refute"]) == (28, 24) and l6_report is w6_report
 
 

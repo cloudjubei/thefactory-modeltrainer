@@ -11,7 +11,7 @@ from harness.floor_l4 import l4_size
 from harness.floor_l5 import SPEC as L5
 from harness.floor_w6 import w6_report
 
-SPEC = {**L5, "measurement_fp": "2285bc9e9ca8", "builder": {**L5["builder"], "order": "tactics"}, "support": 0.9}
+SPEC = {**L5, "measurement_fp": "ce56e01571bb", "builder": {**L5["builder"], "order": "tactics"}, "support": 0.9}
 
 l6_report = w6_report
 
