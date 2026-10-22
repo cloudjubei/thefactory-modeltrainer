@@ -8968,10 +8968,17 @@
       "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_28_of_32_complete_within_2_hours_with_two_phase_maps",
       "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
       "registered_at": "2026-10-21T14:55:18.761079+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_28_of_32_complete_within_2_hours_with_two_phase_maps",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-22T06:00:05.729098+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_k1.json.gz",
-        "started": null
+        "started": "2026-10-21T14:55:25+00:00"
       },
       "pins": {
         "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
@@ -8991,10 +8998,18 @@
       "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_strategies_a_tenth_smaller",
       "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
       "registered_at": "2026-10-21T14:55:19.063849+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "        \nE         - supported\nE         + refuted\n\ntests/test_c49_k1_evidence.py:46: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_strategies_a_tenth_smaller\n1 failed in 0.09s",
+          "drawn_at": "2026-10-22T06:00:06.045327+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_k1.json.gz",
-        "started": null
+        "started": "2026-10-21T14:55:25+00:00"
       },
       "pins": {
         "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
@@ -9014,10 +9029,18 @@
       "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_heavy_sixteen_a_tenth_smaller",
       "note": "User's choice (2026-10-21): run K1 anyway after K0 (h302 inconclusive; h303: two-phase searches help only on leaves far too large to keep, larger on 17 of 26 under 5,000 bits) \u2014 the builder splits and improves, so only the build decides. K1 = L6's rule and pipeline (ties by tactics) with two-phase maps allowed (builder 'phases': switch + second bitmap + levels, a flag bit a map; the search switches/moves/drops phases, judged without the phase's fixed cost). No library; 30-s searches, 20-min root, 2-h cap, accept 30. Positions: L4's 32. Judged against L6 (102,289 bits, 32/32; heavy 16 94,250) under L6's own registration. Mutants: steady_state 71, steady_local 26, strategy_builder 95, native_leaf 25, c4leafwalk 60, floor_k1 13 \u2014 all killed. Full suite 3,188 passed. Fingerprint 98b7fb6ebf7f.",
       "registered_at": "2026-10-21T14:55:20.061581+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_heavy_sixteen_a_tenth_smaller",
+          "ok": false,
+          "detail": "     \nE         - supported\nE         + refuted\n\ntests/test_c49_k1_evidence.py:54: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_k1_evidence.py::test_c49_k1_two_phase_maps_make_the_heavy_sixteen_a_tenth_smaller\n1 failed in 0.09s",
+          "drawn_at": "2026-10-22T06:00:06.724537+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_k1.json.gz",
-        "started": null
+        "started": "2026-10-21T14:55:25+00:00"
       },
       "pins": {
         "tests/test_c49_k1_evidence.py": "69562b3b87441e4efb11368aca3fee7dd84cee8cc13225cb3cb826beb1479e72",
@@ -9029,6 +9052,35 @@
         "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
       },
       "inconclusive_proof": "tests/test_c49_k1_evidence.py::test_c49_k1_the_heavy_size_is_undecidable"
+    },
+    "h307": {
+      "id": "h307",
+      "claim": "\u00a73.6 K1 (registered after the data): the builds barely use two-phase maps \u2014 7 of the 759 maps their leaves use have a second phase \u2014 and the strategies end where L6's did, within run-to-run swing: smaller on 13 positions, larger on 18, 1 tied (sign test p = 0.47). Exceptions fall 2,656 -> 2,171 (32,407 -> 28,168 bits) while maps rise 699 -> 759 (52,122 -> 56,487 bits, a flag bit each included) and table moves 444 -> 520",
+      "mode": "test",
+      "proof": "tests/test_c49_k1_after_evidence.py::test_c49_k1_the_builds_barely_use_two_phase_maps_and_end_where_l6_did",
+      "note": "h304 supported (32/32), h305 refuted (105,767 against 102,289 = 1.03), h306 refuted (heavy 16: 99,044 against 94,250 = 1.05) \u2014 pre-registered. Light 16: 6,723 against 8,039. Builds 24.6 CPU-hours against L6's 25.5. As K0 foresaw (h303): where a keepable leaf is in reach, a second phase costs more than it saves.",
+      "registered_at": "2026-10-22T06:00:24.102967+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_k1_after_evidence.py::test_c49_k1_the_builds_barely_use_two_phase_maps_and_end_where_l6_did",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-22T06:00:24.431184+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_k1.json.gz",
+          "started": "2026-10-21T14:55:25+00:00"
+        },
+        {
+          "path": "evidence/c49_l6.json.gz",
+          "started": "2026-10-21T00:52:59+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_k1_after_evidence.py": "b9c3fdb09a9a2ee5f702ebacea40774895dbef78ce9cc93002fdae60cc01b248"
+      }
     }
   }
 }

@@ -5631,3 +5631,13 @@ decides): L6's rule and pipeline with two-phase maps allowed, on L4's 32 positio
 complete), h305 (nine tenths of L6's 102,289 bits), h306 (nine tenths of L6's 94,250 on F1's 16 heaviest). Fingerprint
 98b7fb6ebf7f. Chain shell PID 83158.
 
+## 2026-10-22 — K1 judged: two-phase maps are a dead end
+
+K1 ended 2026-10-21 21:31Z (6 h 36 m). Pre-registered: h304 supported — 32 of 32 complete; h305 refuted — 105,767 bits
+against L6's 102,289 (1.03); h306 refuted — F1's 16 heaviest 99,044 against 94,250 (1.05). After the data (h307): the
+builds barely use the language — 7 of the 759 maps their leaves use have a second phase — and the strategies end where
+L6's did, within run-to-run swing (smaller on 13, larger on 18, 1 tied; p = 0.47). Exceptions fall 2,656 -> 2,171
+(32,407 -> 28,168 bits), maps rise 699 -> 759 (52,122 -> 56,487 bits, the flag bit each included) and table moves
+444 -> 520. The light 16 took 6,723 against 8,039. As K0 foresaw (h303), where a keepable leaf is in reach a second
+phase costs more than it saves. The code stays, `phases` off by default.
+

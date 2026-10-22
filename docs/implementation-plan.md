@@ -523,9 +523,9 @@ rule standalone and in decision-list order, by ply.
     (judged without the phase's fixed cost), `phases` in the builder (flag bit a map). Piloted on 45 of L6's heavy split
     positions, same 30-s search with/without: 20 smaller, 18 larger; gains only on leaves too large to keep (total
     0.53, a few 17K-613K-bit leaves); under 5,000 bits larger on 17 of 26.
-  - **K1 (h304, h305, h306; running since 2026-10-21 14:55Z, user's choice: run it anyway):** L6 with two-phase maps,
-    L4's 32 positions, against L6 (102,289 bits; heavy 16 94,250): ≥28/32 complete; ≤0.9 of L6 in total; ≤0.9 on the
-    heavy 16. ~7-8 h. Run files in checkpoints/runs/c49_k1*.
+  - **K1 result (h304 supported, h305 + h306 refuted — pre-registered; h307 after the data): two-phase maps are a
+    dead end.** 32/32 complete, 105,767 bits against L6's 102,289 (1.03); heavy 16 at 1.05. Only 7 of 759 maps used
+    have a second phase; smaller on 13, larger on 18 (p = 0.47). Code stays, `phases` off by default.
 
 ## 4. The hybrid process — definition of done
 

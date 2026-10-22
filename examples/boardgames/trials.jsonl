@@ -262,3 +262,4 @@
 {"event": "start", "id": "6c65fb5e656e", "name": "c4_phase_pilot", "argv": ["--spec", "harness.floor_k0", "--workers", "4", "--out", "evidence/c49_k0.json.gz"], "at": "2026-10-21T10:34:17+00:00"}
 {"event": "end", "id": "6c65fb5e656e", "status": "completed", "at": "2026-10-21T10:45:18+00:00", "seconds": 661.1}
 {"event": "start", "id": "9cb82cbd9a83", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_k1", "--workers", "4", "--out", "evidence/c49_k1.json.gz", "--progress", "checkpoints/runs/c49_k1_progress.json"], "at": "2026-10-21T14:55:25+00:00"}
+{"event": "end", "id": "9cb82cbd9a83", "status": "completed", "at": "2026-10-21T21:31:34+00:00", "seconds": 23769.0}
