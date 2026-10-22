@@ -1,0 +1,120 @@
+{
+  "file": "harness/floor_r1.py",
+  "tests": ["tests/test_floor_r1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another fingerprint",
+      "old": "\"measurement_fp\": \"f62cfb41901f\"",
+      "new": "\"measurement_fp\": \"f62cfb41901e\""
+    },
+    {
+      "name": "f1's strategies",
+      "old": "\"source\": \"c49_f2.json.gz\"",
+      "new": "\"source\": \"c49_f1.json.gz\""
+    },
+    {
+      "name": "another f2 total",
+      "old": "\"f2_bits\": 455_959,",
+      "new": "\"f2_bits\": 446_266,"
+    },
+    {
+      "name": "another reference total",
+      "old": "\"f2_reference_bits\": 100_888,",
+      "new": "\"f2_reference_bits\": 100_887,"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": Fraction(1, 10)",
+      "new": "\"support\": Fraction(1, 11)"
+    },
+    {
+      "name": "a looser refute",
+      "old": "\"refute\": Fraction(1, 20)",
+      "new": "\"refute\": Fraction(1, 21)"
+    },
+    {
+      "name": "reproduction unchecked",
+      "old": " or e[\"totals\"][\"fixed\"] != spec[\"f2_reference_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "roots unchecked",
+      "old": "\n            or e.get(\"roots\") != spec[\"roots\"]",
+      "new": ""
+    },
+    {
+      "name": "source unchecked",
+      "old": " or e.get(\"source\") != spec[\"source\"]",
+      "new": ""
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"] or ",
+      "new": ""
+    },
+    {
+      "name": "saving of the references alone",
+      "old": "Fraction(spec[\"f2_reference_bits\"] - references, spec[\"f2_bits\"])",
+      "new": "Fraction(spec[\"f2_reference_bits\"] - references, spec[\"f2_reference_bits\"])"
+    },
+    {
+      "name": "support boundary",
+      "old": "saving >= spec[\"support\"]",
+      "new": "saving > spec[\"support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "saving < spec[\"refute\"]",
+      "new": "saving <= spec[\"refute\"]"
+    },
+    {
+      "name": "measured total against the recorded",
+      "old": "Fraction(spec[\"f2_reference_bits\"] - references",
+      "new": "Fraction(e[\"totals\"][\"fixed\"] - references + 1"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T07:48:29+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "another fingerprint": ["test_r1_measures_f2_s_references"],
+      "f1's strategies": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged",
+        "test_r1_measures_f2_s_references"
+      ],
+      "another f2 total": ["test_r1_measures_f2_s_references"],
+      "another reference total": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged",
+        "test_r1_measures_f2_s_references"
+      ],
+      "a looser support": [
+        "test_r1_measures_f2_s_references",
+        "test_the_saving_is_judged_against_f2_s_whole_strategy"
+      ],
+      "a looser refute": [
+        "test_r1_measures_f2_s_references",
+        "test_the_saving_is_judged_against_f2_s_whole_strategy"
+      ],
+      "reproduction unchecked": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged"
+      ],
+      "roots unchecked": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged"
+      ],
+      "source unchecked": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged"
+      ],
+      "fingerprint unchecked": [
+        "test_a_measurement_that_does_not_reproduce_f2_s_references_is_not_judged"
+      ],
+      "saving of the references alone": ["test_the_saving_is_judged_against_f2_s_whole_strategy"],
+      "support boundary": ["test_the_saving_is_judged_against_f2_s_whole_strategy"],
+      "refute boundary": ["test_the_saving_is_judged_against_f2_s_whole_strategy"],
+      "measured total against the recorded": [
+        "test_the_saving_is_judged_against_f2_s_whole_strategy"
+      ]
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "file": "harness/floor_q1.py",
+  "tests": ["tests/test_floor_q1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another fingerprint",
+      "old": "\"measurement_fp\": \"0183157a95c4\"",
+      "new": "\"measurement_fp\": \"0183157a95c5\""
+    },
+    {
+      "name": "l5's leaves",
+      "old": "\"source\": \"c49_f2.json.gz\"",
+      "new": "\"source\": \"c49_l5.json.gz\""
+    },
+    {
+      "name": "another seed",
+      "old": "\"seed\": 0,",
+      "new": "\"seed\": 1,"
+    },
+    {
+      "name": "fewer leaves",
+      "old": "\"leaves\": 60,",
+      "new": "\"leaves\": 30,"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": Fraction(1, 10)",
+      "new": "\"support\": Fraction(1, 20)"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "e.get(\"measurement_fingerprint\") == SPEC[\"measurement_fp\"] and ",
+      "new": ""
+    },
+    {
+      "name": "source unchecked",
+      "old": " and e.get(\"source\") == SPEC[\"source\"]",
+      "new": ""
+    },
+    {
+      "name": "seed unchecked",
+      "old": "e.get(\"seed\") == SPEC[\"seed\"] and ",
+      "new": ""
+    },
+    {
+      "name": "sample unchecked",
+      "old": " and e.get(\"leaves\") == SPEC[\"leaves\"]",
+      "new": ""
+    },
+    {
+      "name": "reproduction unchecked",
+      "old": "\n            and t[\"one_class\"] + t[\"plain\"] == t[\"coded\"]",
+      "new": ""
+    },
+    {
+      "name": "share of the part alone",
+      "old": "Fraction(t[before] - t[after], t[\"coded\"])",
+      "new": "Fraction(t[before] - t[after], t[before])"
+    },
+    {
+      "name": "support boundary",
+      "old": "saving >= SPEC[\"support\"]",
+      "new": "saving > SPEC[\"support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "saving <= 0",
+      "new": "saving < 0"
+    },
+    {
+      "name": "flags judged on moves",
+      "old": "    return _judge(e, \"one_class\", \"per_class\")",
+      "new": "    return _judge(e, \"plain\", \"tactics_first\")"
+    },
+    {
+      "name": "moves judged on flags",
+      "old": "    return _judge(e, \"plain\", \"tactics_first\")",
+      "new": "    return _judge(e, \"one_class\", \"per_class\")"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T08:02:42+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "another fingerprint": ["test_q1_samples_sixty_of_f2_s_leaves_with_exceptions"],
+      "l5's leaves": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_q1_samples_sixty_of_f2_s_leaves_with_exceptions"
+      ],
+      "another seed": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_q1_samples_sixty_of_f2_s_leaves_with_exceptions"
+      ],
+      "fewer leaves": ["test_q1_samples_sixty_of_f2_s_leaves_with_exceptions"],
+      "a looser support": [
+        "test_flags_by_class_are_judged_on_the_share_of_the_exception_bits_they_save",
+        "test_moves_tactics_first_are_judged_the_same_way",
+        "test_q1_samples_sixty_of_f2_s_leaves_with_exceptions"
+      ],
+      "fingerprint unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "source unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "seed unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "sample unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "reproduction unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "share of the part alone": [
+        "test_flags_by_class_are_judged_on_the_share_of_the_exception_bits_they_save",
+        "test_moves_tactics_first_are_judged_the_same_way"
+      ],
+      "support boundary": [
+        "test_flags_by_class_are_judged_on_the_share_of_the_exception_bits_they_save",
+        "test_moves_tactics_first_are_judged_the_same_way"
+      ],
+      "refute boundary": [
+        "test_flags_by_class_are_judged_on_the_share_of_the_exception_bits_they_save",
+        "test_moves_tactics_first_are_judged_the_same_way"
+      ],
+      "flags judged on moves": [
+        "test_flags_by_class_are_judged_on_the_share_of_the_exception_bits_they_save"
+      ],
+      "moves judged on flags": ["test_moves_tactics_first_are_judged_the_same_way"]
+    }
+  }
+}

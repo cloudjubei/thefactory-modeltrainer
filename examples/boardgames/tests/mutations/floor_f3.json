@@ -1,0 +1,62 @@
+{
+  "file": "harness/floor_f3.py",
+  "tests": ["tests/test_floor_f3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "f2's rule",
+      "old": "\"builder\": L6[\"builder\"]",
+      "new": "\"builder\": F2[\"builder\"]"
+    },
+    {
+      "name": "f2's fingerprint",
+      "old": "\"measurement_fp\": K1[\"measurement_fp\"],\n        ",
+      "new": ""
+    },
+    {
+      "name": "another f2 total",
+      "old": "\"f2_bits\": 455_959}",
+      "new": "\"f2_bits\": 446_266}"
+    },
+    {
+      "name": "judged against f1",
+      "old": "{**spec, \"f1_bits\": spec[\"f2_bits\"]}",
+      "new": "{**F2, **spec}"
+    },
+    {
+      "name": "f1's total kept",
+      "old": "{k: v for k, v in F2.items() if k != \"f1_bits\"}",
+      "new": "F2"
+    },
+    {
+      "name": "own completion judge",
+      "old": "f3_complete = f1_complete",
+      "new": "f3_complete = lambda e, spec: f1_complete(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T07:38:32+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "f2's rule": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_f3_is_f2_with_l6_s_rule_under_today_s_code"
+      ],
+      "f2's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_f3_is_f2_with_l6_s_rule_under_today_s_code"
+      ],
+      "another f2 total": [
+        "test_f3_is_f2_with_l6_s_rule_under_today_s_code",
+        "test_the_whole_strategy_is_judged_against_f2_s"
+      ],
+      "judged against f1": [
+        "test_an_unfinished_position_can_only_refute",
+        "test_the_whole_strategy_is_judged_against_f2_s"
+      ],
+      "f1's total kept": ["test_f3_is_f2_with_l6_s_rule_under_today_s_code"],
+      "own completion judge": ["test_f3_is_f2_with_l6_s_rule_under_today_s_code"]
+    }
+  }
+}

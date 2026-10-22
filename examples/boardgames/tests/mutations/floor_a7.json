@@ -1,0 +1,62 @@
+{
+  "file": "harness/floor_a7.py",
+  "tests": ["tests/test_floor_a7.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "30x acceptance",
+      "old": "\"builder\": {**L5[\"builder\"], \"accept\": 10}}",
+      "new": "\"builder\": dict(L5[\"builder\"])}"
+    },
+    {
+      "name": "another bar",
+      "old": "\"accept\": 10}",
+      "new": "\"accept\": 20}"
+    },
+    {
+      "name": "b1's longer searches",
+      "old": "\"builder\": {**L5[\"builder\"], \"accept\": 10}}",
+      "new": "\"builder\": {**B1[\"builder\"], \"accept\": 10}}"
+    },
+    {
+      "name": "l5's fingerprint",
+      "old": "SPEC = {**B1, \"measurement_fp\": K1[\"measurement_fp\"], ",
+      "new": "SPEC = {**B1, "
+    },
+    {
+      "name": "judged against its own registration",
+      "old": "    return l4_size(e, control, SPEC, CONTROL)\n",
+      "new": "    return l4_size(e, control, SPEC, SPEC)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "a7_report = w6_report",
+      "new": "a7_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T07:35:57+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "30x acceptance": [
+        "test_a7_is_judged_against_b1_s_control_under_the_control_s_own_registration",
+        "test_a7_is_l5_accepting_leaves_at_10x_on_b1_s_positions_under_today_s_code"
+      ],
+      "another bar": ["test_a7_is_l5_accepting_leaves_at_10x_on_b1_s_positions_under_today_s_code"],
+      "b1's longer searches": [
+        "test_a7_is_l5_accepting_leaves_at_10x_on_b1_s_positions_under_today_s_code"
+      ],
+      "l5's fingerprint": [
+        "test_a7_is_judged_against_b1_s_control_under_the_control_s_own_registration",
+        "test_a7_is_l5_accepting_leaves_at_10x_on_b1_s_positions_under_today_s_code"
+      ],
+      "judged against its own registration": [
+        "test_a7_is_judged_against_b1_s_control_under_the_control_s_own_registration"
+      ],
+      "own completion judge": [
+        "test_a7_is_l5_accepting_leaves_at_10x_on_b1_s_positions_under_today_s_code"
+      ]
+    }
+  }
+}

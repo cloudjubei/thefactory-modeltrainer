@@ -1,0 +1,136 @@
+{
+  "file": "harness/learned_default.py",
+  "tests": ["tests/test_learned_default.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "no hidden nonlinearity",
+      "old": "nn.Linear(n_in, hidden), nn.ReLU(), nn.Linear",
+      "new": "nn.Linear(n_in, hidden), nn.Identity(), nn.Linear"
+    },
+    {
+      "name": "absolute colours",
+      "old": "    own = game.current_player(state) + 1\n",
+      "new": "    own = 1\n"
+    },
+    {
+      "name": "empty as the opponent's",
+      "old": "int(v not in (0, own))",
+      "new": "int(v != own)"
+    },
+    {
+      "name": "facts of unsafe moves",
+      "old": "        if a in safe:\n",
+      "new": "        if True:\n"
+    },
+    {
+      "name": "safe flag dropped",
+      "old": "            out += [1, int(facts._wins_in_two",
+      "new": "            out += [0, int(facts._wins_in_two"
+    },
+    {
+      "name": "loses-in-two dropped",
+      "old": ", int(facts._loses_in_two(state, a))]",
+      "new": ", 0]"
+    },
+    {
+      "name": "unsafe picks allowed",
+      "old": "    return net(x).masked_fill(~safe, float(\"-inf\"))",
+      "new": "    return net(x)"
+    },
+    {
+      "name": "highest-index tie",
+      "old": "return _masked(net, x, safe).argmax(dim=1)",
+      "new": "return _masked(net, x, safe).flip(1).argmax(dim=1).neg().add(safe.shape[1] - 1)"
+    },
+    {
+      "name": "untrainable rows allowed",
+      "old": "    if not (won & safe).any(dim=1).all():\n        raise",
+      "new": "    if False:\n        raise"
+    },
+    {
+      "name": "unseeded",
+      "old": "    torch.manual_seed(seed)\n",
+      "new": ""
+    },
+    {
+      "name": "loss on the best move alone",
+      "old": "-torch.logsumexp(log_p.masked_fill(~(won[at] & safe[at]), float(\"-inf\")), dim=1).mean()",
+      "new": "-log_p.max(dim=1).values.mean()"
+    },
+    {
+      "name": "no step",
+      "old": "            opt.step()\n",
+      "new": ""
+    },
+    {
+      "name": "one level too many",
+      "old": "    steps = 2 ** (bits - 1) - 1\n",
+      "new": "    steps = 2 ** (bits - 1)\n"
+    },
+    {
+      "name": "quantized in place",
+      "old": "    q = copy.deepcopy(net)\n",
+      "new": "    q = net\n"
+    },
+    {
+      "name": "not rounded",
+      "old": "(p / (top / steps)).round()",
+      "new": "(p / (top / steps))"
+    },
+    {
+      "name": "scales free",
+      "old": " + SCALE_BITS * len(params)",
+      "new": ""
+    },
+    {
+      "name": "bits a weight ignored",
+      "old": "sum(p.numel() for p in params) * bits",
+      "new": "sum(p.numel() for p in params) * 4"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T08:10:58+00:00",
+    "killed": 17,
+    "survived": [],
+    "killed_by": {
+      "no hidden nonlinearity": ["test_the_hidden_layer_learns_what_no_linear_score_can"],
+      "absolute colours": ["test_the_board_is_read_as_the_mover_sees_it_then_each_move_s_facts"],
+      "empty as the opponent's": [
+        "test_the_board_is_read_as_the_mover_sees_it_then_each_move_s_facts"
+      ],
+      "facts of unsafe moves": [
+        "test_a_move_that_wins_in_two_and_one_that_loses_in_two_are_marked",
+        "test_the_board_is_read_as_the_mover_sees_it_then_each_move_s_facts"
+      ],
+      "safe flag dropped": ["test_the_board_is_read_as_the_mover_sees_it_then_each_move_s_facts"],
+      "loses-in-two dropped": ["test_a_move_that_wins_in_two_and_one_that_loses_in_two_are_marked"],
+      "unsafe picks allowed": [
+        "test_a_tie_goes_to_the_lowest_safe_move",
+        "test_picks_take_the_best_safe_move_and_never_an_unsafe_one"
+      ],
+      "highest-index tie": ["test_a_tie_goes_to_the_lowest_safe_move"],
+      "untrainable rows allowed": ["test_a_position_with_no_winning_safe_move_cannot_train"],
+      "unseeded": ["test_training_is_reproducible_from_its_seed"],
+      "loss on the best move alone": [
+        "test_the_hidden_layer_learns_what_no_linear_score_can",
+        "test_training_learns_to_put_its_weight_on_winning_moves"
+      ],
+      "no step": [
+        "test_the_hidden_layer_learns_what_no_linear_score_can",
+        "test_training_learns_to_put_its_weight_on_winning_moves"
+      ],
+      "one level too many": [
+        "test_quantized_weights_take_at_most_their_levels_and_keep_the_largest"
+      ],
+      "quantized in place": [
+        "test_quantized_weights_take_at_most_their_levels_and_keep_the_largest"
+      ],
+      "not rounded": ["test_quantized_weights_take_at_most_their_levels_and_keep_the_largest"],
+      "scales free": ["test_the_net_s_bits_are_its_weights_at_their_width_and_a_scale_a_tensor"],
+      "bits a weight ignored": [
+        "test_the_net_s_bits_are_its_weights_at_their_width_and_a_scale_a_tensor"
+      ]
+    }
+  }
+}

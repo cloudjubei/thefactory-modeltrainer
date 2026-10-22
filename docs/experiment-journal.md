@@ -5641,3 +5641,53 @@ L6's did, within run-to-run swing (smaller on 13, larger on 18, 1 tied; p = 0.47
 444 -> 520. The light 16 took 6,723 against 8,039. As K0 foresaw (h303), where a keepable leaf is in reach a second
 phase costs more than it saves. The code stays, `phases` off by default.
 
+
+## 2026-10-22 — the remaining levers, in order (user's choice: 5, 6, 7, then 1, 2, 3)
+
+The user chose to run options 5, 6 and 7, then 1, 2 and 3 with the runs started as early as possible, and to come
+back about richer map symbols (option 4) before any write-up if nothing of value comes out.
+
+A7 launched 07:36Z (option 5, the other side of A6's bar): L5 on F2's 16 heaviest positions keeping leaves with
+exceptions already at 10x (not 30x), judged against B1's control — h308 (14 of 16 complete), h309 (nine tenths of
+104,860). floor_a7 6/6 mutants. Chain shell PID 5966, 4 workers.
+
+F3 launched 07:38Z (option 2): F2 with only L6's tie-break changed, every frontier position in F1's order and waves
+from the same seed library, judged against F2's 455,959 — h310 (completion as F1), h311 (nine tenths). floor_f3 6/6
+mutants. Chain shell PID 13698, 4 workers, ~62 h. Both runs' fingerprint is 98b7fb6ebf7f, so no measured module
+(the builder, the run script, steady_state …) may change until F3 ends — this shaped G1 below.
+
+R1 (option 1): leaf references. F2 charges every leaf ceil(log2) of its whole map list, the library included (up to
+~2,500 maps in late waves): 100,888 bits. Designed on F1's evidence only (scratch pilot): naming the used library maps
+once and coding every leaf as a move-to-front rank, with a build's own maps stored in order of first use so each first
+use is one NEW symbol, took F1's 95,456 to 35,789; an enumerative count and a per-root selector were tried there and
+dropped. harness/reference_coding.py (walk_leaves in the decoder's order; fixed and first_use; 21/21 mutants),
+scripts/c4_reference_coding.py (reproduces F2's reference bits root by root), harness/floor_r1.py (14/14). h312
+pre-registered (a tenth of F2 supports, under a twentieth refutes), then measured on F2: 43,124 bits — 57,764 saved,
+12.7% (supported). The certified whole game is now 398,195 bits, no move changed. Libraries are what make references
+dear: on L6 (no library) the same code saves 37% of reference bits but little of the whole.
+
+G1 registered (option 6, maps shared across the heavy tail): the builder tries only the last reuse_window (200)
+maps it holds, and a library sits at the front of that list, so F2's heavy builds (800-2,500 library maps) reached
+little of it (151 of 2,208 leaves). G1 builds F2's heavy 16 starting from all 766 maps B1's control found on them,
+reuse_window raised to 100,000 (the control's builds keep at most 116 own maps, so only the library's reach changes
+— and no measured code, with A7 and F3 running). Trying all 766 at a position takes 0.19 s; 2 of 20 sampled split
+positions were covered by some library map. Judged with both arms' references by first_use and each library map a
+leaf plays paid once: h313 (14 of 16), h314 (nine tenths of the control). floor_g1 20/20 mutants. Queued behind A7
+(chain PID 86700), 4 workers.
+
+Q1 (option 7): exceptions. A pilot on 42 of L5's excepted leaves found them at the same rate in every class (map move
+levelled or default × tactics agreeing or not: 0.12-0.28%), and 43% of them playing the tactics move.
+scripts/c4_exception_classes.py, harness/floor_q1.py (15/15). Pre-registered on a seeded 60 of F2's excepted leaves,
+the walk reproducing their coded bits: flags per class h315 refuted (6,521 bits against one class's 5,768: −11%);
+moves tactics first h316 inconclusive (753 against 881: 1.9% of the 6,649 exception bits; 265 of 531 exceptions play
+the tactics move). Where exceptions fall is not predicted by anything the rule already knows; exception coding is
+settled.
+
+N1 launched 08:34Z (option 3, a learned default paid once — a pilot before any build): harness/learned_default.py (a
+net over the cells as the mover sees them and each move's safe / wins-in-two / loses-in-two facts; masked softmax
+over the safe moves, trained on minus the log of the winning moves' share; weights quantized with a 32-bit scale a
+tensor; 17/17 mutants), scripts/c4_learned_default.py (D1's own test positions, which must reproduce D1's lowest and
+tactics hits; training positions drawn the same way from F2's strategies away from L4's 32 roots, test positions
+dropped; all solved exactly). 32 hidden units, 4-bit weights: 19,996 bits. h317: at most 100 misses of 4,523 (half
+tactics'), refuted at 200. floor_n1 16/16. A 94-position smoke found the pooling walk ignored the run's tie-break
+order (fixed before registering). Chain PID 72346, 1 worker.

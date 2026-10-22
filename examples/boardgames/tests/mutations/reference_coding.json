@@ -1,0 +1,188 @@
+{
+  "file": "harness/reference_coding.py",
+  "tests": ["tests/test_reference_coding.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "gamma of zero allowed",
+      "old": "    if n < 1:\n        raise",
+      "new": "    if n < 0:\n        raise"
+    },
+    {
+      "name": "gamma one bit short",
+      "old": "return 2 * (n.bit_length() - 1) + 1",
+      "new": "return 2 * (n.bit_length() - 1)"
+    },
+    {
+      "name": "gamma as a fixed width",
+      "old": "return 2 * (n.bit_length() - 1) + 1",
+      "new": "return n.bit_length()"
+    },
+    {
+      "name": "transpositions read twice",
+      "old": "        if key in seen:\n            continue\n",
+      "new": ""
+    },
+    {
+      "name": "leaf walked on",
+      "old": "            out.append(node[\"leaf\"])\n            continue\n",
+      "new": "            out.append(node[\"leaf\"])\n"
+    },
+    {
+      "name": "terminal walked on",
+      "old": "        if game.is_terminal(child):\n            continue\n",
+      "new": ""
+    },
+    {
+      "name": "turn kept is a reply",
+      "old": "        if player(child) == player(s):\n            stack.append(child)\n            continue\n",
+      "new": ""
+    },
+    {
+      "name": "terminal replies walked",
+      "old": " if not game.is_terminal(c)]",
+      "new": "]"
+    },
+    {
+      "name": "replies in reverse",
+      "old": "stack.extend(reversed(replies))",
+      "new": "stack.extend(replies)"
+    },
+    {
+      "name": "missing node skipped",
+      "old": "        node = nodes[key]\n",
+      "new": "        node = nodes.get(key, {\"leaf\": 0})\n"
+    },
+    {
+      "name": "unplayed own map allowed",
+      "old": " or not set(range(shared + 1, n_maps)) <= set(refs)",
+      "new": ""
+    },
+    {
+      "name": "out-of-range index allowed",
+      "old": "any(not 0 <= x < n_maps for x in refs) or ",
+      "new": ""
+    },
+    {
+      "name": "empty map not named",
+      "old": "named = sorted({x for x in refs if x <= shared})",
+      "new": "named = sorted({x for x in refs if 0 < x <= shared})"
+    },
+    {
+      "name": "count in fixed width",
+      "old": "bits = gamma_bits(len(named) + 1) + ",
+      "new": "bits = math.ceil(math.log2(shared + 2)) + "
+    },
+    {
+      "name": "which maps not paid",
+      "old": "bits = gamma_bits(len(named) + 1) + math.ceil(math.log2(math.comb(shared + 1, len(named))))",
+      "new": "bits = gamma_bits(len(named) + 1)"
+    },
+    {
+      "name": "no move to front",
+      "old": "        order.insert(0, order.pop(at))\n",
+      "new": ""
+    },
+    {
+      "name": "new map at the back",
+      "old": "            order.insert(1, x)",
+      "new": "            order.append(x)"
+    },
+    {
+      "name": "new map forgotten",
+      "old": "            met.add(x)\n",
+      "new": ""
+    },
+    {
+      "name": "fixed width rounded down",
+      "old": "len(refs) * (math.ceil(math.log2(n_maps)) if n_maps > 1 else 0)",
+      "new": "len(refs) * (int(math.log2(n_maps)) if n_maps > 1 else 0)"
+    },
+    {
+      "name": "unknown code read as first use",
+      "old": "    if code == \"first_use\":\n        return _first_use(refs, n_maps, shared)\n    raise",
+      "new": "    return _first_use(refs, n_maps, shared)\n    raise"
+    },
+    {
+      "name": "rank from zero",
+      "old": "        bits += gamma_bits(at + 1)",
+      "new": "        bits += gamma_bits(at + 1) - 1"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T07:48:08+00:00",
+    "killed": 21,
+    "survived": [],
+    "killed_by": {
+      "gamma of zero allowed": ["test_gamma_codes_a_positive_count_in_twice_its_length_less_one"],
+      "gamma one bit short": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front",
+        "test_gamma_codes_a_positive_count_in_twice_its_length_less_one",
+        "test_library_maps_are_named_once_and_ranked_among_the_used",
+        "test_the_codes_and_how_many_library_maps_are_named",
+        "test_the_empty_map_counts_among_the_named_ones"
+      ],
+      "gamma as a fixed width": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front",
+        "test_gamma_codes_a_positive_count_in_twice_its_length_less_one",
+        "test_library_maps_are_named_once_and_ranked_among_the_used",
+        "test_the_codes_and_how_many_library_maps_are_named",
+        "test_the_empty_map_counts_among_the_named_ones"
+      ],
+      "transpositions read twice": [
+        "test_a_move_keeping_the_turn_leads_straight_on_and_a_transposition_is_read_once"
+      ],
+      "leaf walked on": [
+        "test_a_move_keeping_the_turn_leads_straight_on_and_a_transposition_is_read_once",
+        "test_leaves_are_read_depth_first_replies_in_order_each_position_once"
+      ],
+      "terminal walked on": ["test_a_terminal_move_ends_the_line_and_a_missing_node_is_refused"],
+      "turn kept is a reply": [
+        "test_a_move_keeping_the_turn_leads_straight_on_and_a_transposition_is_read_once",
+        "test_leaves_are_read_depth_first_replies_in_order_each_position_once"
+      ],
+      "terminal replies walked": [
+        "test_leaves_are_read_depth_first_replies_in_order_each_position_once"
+      ],
+      "replies in reverse": [
+        "test_leaves_are_read_depth_first_replies_in_order_each_position_once"
+      ],
+      "missing node skipped": ["test_a_terminal_move_ends_the_line_and_a_missing_node_is_refused"],
+      "unplayed own map allowed": ["test_an_own_map_no_leaf_plays_cannot_be_coded_by_first_use"],
+      "out-of-range index allowed": ["test_an_own_map_no_leaf_plays_cannot_be_coded_by_first_use"],
+      "empty map not named": ["test_the_empty_map_counts_among_the_named_ones"],
+      "count in fixed width": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front",
+        "test_library_maps_are_named_once_and_ranked_among_the_used",
+        "test_the_empty_map_counts_among_the_named_ones"
+      ],
+      "which maps not paid": ["test_library_maps_are_named_once_and_ranked_among_the_used"],
+      "no move to front": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front",
+        "test_library_maps_are_named_once_and_ranked_among_the_used",
+        "test_the_empty_map_counts_among_the_named_ones"
+      ],
+      "new map at the back": ["test_a_seen_map_moves_to_the_front"],
+      "new map forgotten": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front"
+      ],
+      "fixed width rounded down": [
+        "test_the_fixed_code_is_the_builder_s_width_over_the_whole_list_per_leaf"
+      ],
+      "unknown code read as first use": [
+        "test_an_own_map_no_leaf_plays_cannot_be_coded_by_first_use"
+      ],
+      "rank from zero": [
+        "test_a_build_s_own_maps_cost_one_new_symbol_at_first_use_and_their_rank_after",
+        "test_a_seen_map_moves_to_the_front",
+        "test_library_maps_are_named_once_and_ranked_among_the_used",
+        "test_the_empty_map_counts_among_the_named_ones"
+      ]
+    }
+  }
+}

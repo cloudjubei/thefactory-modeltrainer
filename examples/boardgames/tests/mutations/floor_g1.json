@@ -1,0 +1,171 @@
+{
+  "file": "harness/floor_g1.py",
+  "tests": ["tests/test_floor_g1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "l5's window",
+      "old": "\"builder\": {**L5[\"builder\"], \"reuse_window\": 100_000}}",
+      "new": "\"builder\": L5[\"builder\"]}"
+    },
+    {
+      "name": "another window",
+      "old": "\"reuse_window\": 100_000}",
+      "new": "\"reuse_window\": 1_000}"
+    },
+    {
+      "name": "no library",
+      "old": "\"library_from\": \"c49_b1_control.json.gz\",\n        ",
+      "new": ""
+    },
+    {
+      "name": "l5's fingerprint",
+      "old": "SPEC = {**B1, \"measurement_fp\": K1[\"measurement_fp\"], ",
+      "new": "SPEC = {**B1, "
+    },
+    {
+      "name": "own completion judge",
+      "old": "g1_report = w6_report",
+      "new": "g1_report = lambda e, spec: w6_report(e, spec)"
+    },
+    {
+      "name": "library reversed",
+      "old": "    return [(levels, empty) for r in control[\"roots\"] for levels, empty in r[\"found_maps\"]]",
+      "new": "    return [(levels, empty) for r in control[\"roots\"][::-1] for levels, empty in r[\"found_maps\"]]"
+    },
+    {
+      "name": "unfinished keeps its references",
+      "old": "        return r[\"bits\"][\"nodes\"] - r[\"bits\"][\"leaves\"] * (math.ceil(math.log2(n_maps)) if n_maps > 1 else 0)\n",
+      "new": "        return r[\"bits\"][\"nodes\"]\n"
+    },
+    {
+      "name": "builder's references kept",
+      "old": "    return r[\"bits\"][\"nodes\"] - code_bits(\"fixed\", refs, n_maps, shared) + code_bits(\"first_use\", refs, n_maps, shared)",
+      "new": "    return r[\"bits\"][\"nodes\"]"
+    },
+    {
+      "name": "arm's integrity unchecked",
+      "old": "    if _integrity(e, SPEC) or _integrity(control, CONTROL)",
+      "new": "    if _integrity(control, CONTROL)"
+    },
+    {
+      "name": "control's integrity unchecked",
+      "old": "    if _integrity(e, SPEC) or _integrity(control, CONTROL)",
+      "new": "    if _integrity(e, SPEC)"
+    },
+    {
+      "name": "control's completion unchecked",
+      "old": " or not all(r[\"complete\"] for r in control[\"roots\"])",
+      "new": ""
+    },
+    {
+      "name": "library size unchecked",
+      "old": "r[\"shared\"] != len(library) or ",
+      "new": ""
+    },
+    {
+      "name": "library maps unchecked",
+      "old": "r[\"maps\"][1:1 + len(library)] != [m for m, _ in library]\n                or ",
+      "new": ""
+    },
+    {
+      "name": "library cells unchecked",
+      "old": "\n                or r[\"map_empty\"][1:1 + len(library)] != [empty for _, empty in library]",
+      "new": ""
+    },
+    {
+      "name": "library maps free",
+      "old": "    bits = sum(_coded(r) for r in e[\"roots\"]) + shared\n",
+      "new": "    bits = sum(_coded(r) for r in e[\"roots\"])\n"
+    },
+    {
+      "name": "empty map paid",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)}",
+      "new": "if 0 <= n.get(\"leaf\", 0) <= len(library)}"
+    },
+    {
+      "name": "own maps paid again",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)}",
+      "new": "if 1 <= n.get(\"leaf\", 0) <= len(library) + 1}"
+    },
+    {
+      "name": "refute boundary",
+      "old": "\"refuted\" if ratio >= 1",
+      "new": "\"refuted\" if ratio > 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "ratio <= SPEC[\"support\"]",
+      "new": "ratio < SPEC[\"support\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and ratio",
+      "new": "\"supported\" if ratio"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T07:53:05+00:00",
+    "killed": 20,
+    "survived": [],
+    "killed_by": {
+      "l5's window": [
+        "test_a_run_off_either_registration_is_not_judged",
+        "test_g1_is_l5_with_b1_s_control_s_maps_all_in_reach_on_b1_s_positions"
+      ],
+      "another window": ["test_g1_is_l5_with_b1_s_control_s_maps_all_in_reach_on_b1_s_positions"],
+      "no library": ["test_g1_is_l5_with_b1_s_control_s_maps_all_in_reach_on_b1_s_positions"],
+      "l5's fingerprint": [
+        "test_a_run_off_either_registration_is_not_judged",
+        "test_g1_is_l5_with_b1_s_control_s_maps_all_in_reach_on_b1_s_positions"
+      ],
+      "own completion judge": [
+        "test_g1_is_l5_with_b1_s_control_s_maps_all_in_reach_on_b1_s_positions"
+      ],
+      "library reversed": [
+        "test_a_build_that_did_not_start_from_the_control_s_maps_is_not_judged",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_both_arms_are_coded_by_first_use_and_a_played_library_map_paid_once",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_library_is_every_map_the_control_found_in_its_order",
+        "test_the_verdict_is_judged_on_the_ratio"
+      ],
+      "unfinished keeps its references": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "builder's references kept": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_both_arms_are_coded_by_first_use_and_a_played_library_map_paid_once",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_on_the_ratio"
+      ],
+      "arm's integrity unchecked": ["test_a_run_off_either_registration_is_not_judged"],
+      "control's integrity unchecked": ["test_a_run_off_either_registration_is_not_judged"],
+      "control's completion unchecked": ["test_a_control_with_an_unfinished_root_is_not_judged"],
+      "library size unchecked": [
+        "test_a_build_that_did_not_start_from_the_control_s_maps_is_not_judged"
+      ],
+      "library maps unchecked": [
+        "test_a_build_that_did_not_start_from_the_control_s_maps_is_not_judged"
+      ],
+      "library cells unchecked": [
+        "test_a_build_that_did_not_start_from_the_control_s_maps_is_not_judged"
+      ],
+      "library maps free": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_both_arms_are_coded_by_first_use_and_a_played_library_map_paid_once",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_on_the_ratio"
+      ],
+      "empty map paid": ["test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library"],
+      "own maps paid again": [
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library"
+      ],
+      "refute boundary": ["test_the_verdict_is_judged_on_the_ratio"],
+      "support boundary": ["test_the_verdict_is_judged_on_the_ratio"],
+      "partial supports": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ]
+    }
+  }
+}

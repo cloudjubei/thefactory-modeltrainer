@@ -9081,6 +9081,256 @@
       "pins": {
         "tests/test_c49_k1_after_evidence.py": "b9c3fdb09a9a2ee5f702ebacea40774895dbef78ce9cc93002fdae60cc01b248"
       }
+    },
+    "h308": {
+      "id": "h308",
+      "claim": "\u00a73.6 A7: keeping leaves with exceptions already at 10x their bits in positions (not 30x), at least 14 of F2's 16 heaviest positions get a complete certified strategy within 2 hours under L5's rule and pipeline. Refuted at 12 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_14_of_16_complete_within_2_hours_accepting_at_10x",
+      "note": "User's choice (option 5 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built and judged under its own registration (h291/h292). Fingerprint 98b7fb6ebf7f. floor_a7 6/6 mutants.",
+      "registered_at": "2026-10-22T07:36:24.857101+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_a7.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_a7_evidence.py": "c6fe6346dbccafb2891077f637a7c238221cf6c6d455d2d466cf577c2c409f7d",
+        "harness/floor_a7.py": "f3a1803ba730ae4dcf4e196b4f34cc204f05c07e05e58d7d9f0552584504a843",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a7_evidence.py::test_c49_a7_completion_is_undecidable"
+    },
+    "h309": {
+      "id": "h309",
+      "claim": "\u00a73.6 A7: keeping leaves with exceptions already at 10x their bits in positions (not 30x), the strategies for F2's 16 heaviest positions take no more than nine tenths of B1's control's 104,860 bits. Refuted at the control's bits or more (an unfinished root counts at its partial size)",
+      "mode": "test",
+      "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller",
+      "note": "User's choice (option 5 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built and judged under its own registration (h291/h292). Fingerprint 98b7fb6ebf7f. floor_a7 6/6 mutants.",
+      "registered_at": "2026-10-22T07:36:25.245190+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_a7.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_a7_evidence.py": "c6fe6346dbccafb2891077f637a7c238221cf6c6d455d2d466cf577c2c409f7d",
+        "harness/floor_a7.py": "f3a1803ba730ae4dcf4e196b4f34cc204f05c07e05e58d7d9f0552584504a843",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a7_evidence.py::test_c49_a7_the_size_is_undecidable"
+    },
+    "h310": {
+      "id": "h310",
+      "claim": "\u00a73.6 F3: with L6's rule (a deciding level's ties broken by tactics), every one of the opening's 671 frontier positions gets a complete certified strategy within 2 hours. Refuted when more than 7 do not finish",
+      "mode": "test",
+      "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_every_frontier_position_completes",
+      "note": "User's choice (option 2 of the remaining levers, 2026-10-22). F2 with only L6's tie-break changed; same order, waves, seed library and cap. Fingerprint 98b7fb6ebf7f. floor_f3 6/6 mutants. Expected from L6 (light 0.66, heavy 0.97): about 0.85-0.95 of F2.",
+      "registered_at": "2026-10-22T07:38:49.090982+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_f3.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_f3_evidence.py": "5f7406bb149a253142c7c66965bc536a6bc046b1949c195ff0d6351d75ec45a0",
+        "harness/floor_f3.py": "1d22a11dba5b185e748a3e6695103638134697c770dbb6ce474d449ab49ffcd6",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_f3_evidence.py::test_c49_f3_completion_is_undecidable"
+    },
+    "h311": {
+      "id": "h311",
+      "claim": "\u00a73.6 F3: with L6's rule, the certified first-player strategy for the whole game takes no more than nine tenths of F2's 455,959 bits. Refuted at F2's bits or more (a partial total counting as a lower bound)",
+      "mode": "test",
+      "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_the_whole_strategy_is_a_tenth_smaller_than_f2_s",
+      "note": "User's choice (option 2 of the remaining levers, 2026-10-22). F2 with only L6's tie-break changed; same order, waves, seed library and cap. Fingerprint 98b7fb6ebf7f. floor_f3 6/6 mutants. Expected from L6 (light 0.66, heavy 0.97): about 0.85-0.95 of F2.",
+      "registered_at": "2026-10-22T07:38:50.089169+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_f3.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_f3_evidence.py": "5f7406bb149a253142c7c66965bc536a6bc046b1949c195ff0d6351d75ec45a0",
+        "harness/floor_f3.py": "1d22a11dba5b185e748a3e6695103638134697c770dbb6ce474d449ab49ffcd6",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_f3_evidence.py::test_c49_f3_the_whole_strategy_s_size_is_undecidable"
+    },
+    "h312": {
+      "id": "h312",
+      "claim": "\u00a73.6 R1: coding F2's leaf references with first_use (the library maps a build's leaves use named once, every leaf a move-to-front rank in walk order, a build's own maps stored in order of first use) saves at least a tenth of F2's whole 455,959 bits, no move changed. Refuted under a twentieth",
+      "mode": "test",
+      "proof": "tests/test_c49_r1_evidence.py::test_c49_r1_first_use_references_save_a_tenth_of_the_whole_game",
+      "note": "User's choice (option 1 of the remaining levers, 2026-10-22). Designed on F1's evidence only (scratch pilot: F1's references 95,456 -> 35,789; a per-root selector and an enumerative count were tried there and dropped); F2 not looked at. Fingerprint f62cfb41901f. reference_coding 21/21, floor_r1 14/14 mutants.",
+      "registered_at": "2026-10-22T07:48:55.018045+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_r1_evidence.py::test_c49_r1_first_use_references_save_a_tenth_of_the_whole_game",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-10-22T07:49:01.090072+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_r1.json.gz",
+        "started": "2026-10-22T07:48:56.075682+00:00"
+      },
+      "pins": {
+        "tests/test_c49_r1_evidence.py": "57ca6aa2426b7cb4fc5a30b203850114912b3b339a9d8cbe3e49c625ac12a43e",
+        "harness/floor_r1.py": "242096fd73975e6c7aa8cba91ee5854ea0999c275ea460e74e407393c489f4fe",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e",
+        "scripts/c4_reference_coding.py": "bfdef83a3a08d2fbc8a571d9fca3d8b33dfea9dd46470ef86d94f64effab2da1"
+      },
+      "inconclusive_proof": "tests/test_c49_r1_evidence.py::test_c49_r1_the_saving_is_undecidable"
+    },
+    "h313": {
+      "id": "h313",
+      "claim": "\u00a73.6 G1: starting from every map B1's control found on F2's 16 heaviest positions, all within reach, at least 14 of the 16 get a complete certified strategy within 2 hours under L5's rule and pipeline. Refuted at 12 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_14_of_16_complete_within_2_hours_with_every_map_in_reach",
+      "note": "User's choice (option 6 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built (h291/h292). Library 766 maps; reuse_window 100,000 (no measured code changed \u2014 A7 and F3 were running). Timing probe: trying all 766 at a split position takes 0.19 s; 2 of 20 sampled split positions were covered by some library map. Queued to start when A7 finishes, 4 workers. Fingerprint 98b7fb6ebf7f. floor_g1 20/20 mutants.",
+      "registered_at": "2026-10-22T07:53:25.182495+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g1_evidence.py": "d7628d12f6c6fe835f11d18a99e044da5f60210bc43bdbbc0b1708b122819eaf",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/steady_state.py": "c520bdeffc1ba89924245c1f0cc46ad15f2ea7effb3b21a6239310b1db511714"
+      },
+      "inconclusive_proof": "tests/test_c49_g1_evidence.py::test_c49_g1_completion_is_undecidable"
+    },
+    "h314": {
+      "id": "h314",
+      "claim": "\u00a73.6 G1: starting from every map B1's control found on F2's 16 heaviest positions, all within reach, the 16 strategies \u2014 references coded by first_use, each library map a leaf plays paid once \u2014 take no more than nine tenths of the control's bits coded the same way. Refuted at the control's or more (an unfinished root counts without its references)",
+      "mode": "test",
+      "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_shared_maps_make_the_heavy_strategies_a_tenth_smaller",
+      "note": "User's choice (option 6 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built (h291/h292). Library 766 maps; reuse_window 100,000 (no measured code changed \u2014 A7 and F3 were running). Timing probe: trying all 766 at a split position takes 0.19 s; 2 of 20 sampled split positions were covered by some library map. Queued to start when A7 finishes, 4 workers. Fingerprint 98b7fb6ebf7f. floor_g1 20/20 mutants.",
+      "registered_at": "2026-10-22T07:53:26.080719+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g1_evidence.py": "d7628d12f6c6fe835f11d18a99e044da5f60210bc43bdbbc0b1708b122819eaf",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/steady_state.py": "c520bdeffc1ba89924245c1f0cc46ad15f2ea7effb3b21a6239310b1db511714"
+      },
+      "inconclusive_proof": "tests/test_c49_g1_evidence.py::test_c49_g1_the_size_is_undecidable"
+    },
+    "h315": {
+      "id": "h315",
+      "claim": "\u00a73.6 Q1: on a seeded sample of 60 of F2's leaves with exceptions, coding the exception flags separately per class (map move from a levelled cell or the unlevelled last level x the tactics order agreeing or not) saves at least a tenth of the leaves' coded exception bits. Refuted at no saving",
+      "mode": "test",
+      "proof": "tests/test_c49_q1_evidence.py::test_c49_q1_flags_coded_per_class_save_a_tenth_of_the_exception_bits",
+      "note": "User's choice (option 7 of the remaining levers, 2026-10-22). Piloted on L5's leaves (scratch, 42 leaves: exception rates 0.12-0.28% in every class, 43% of exceptions the tactics move; a 6-leaf smoke of this script: flags per class 806 against 694, moves 74 against 86 of 780 coded bits) \u2014 expected refuted for flags, inconclusive for moves. Fingerprint 0183157a95c4. floor_q1 15/15 mutants.",
+      "registered_at": "2026-10-22T08:02:56.885409+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_q1_evidence.py::test_c49_q1_flags_coded_per_class_save_a_tenth_of_the_exception_bits",
+          "ok": false,
+          "detail": "  \nE         - supported\nE         + refuted\n\ntests/test_c49_q1_evidence.py:27: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_q1_evidence.py::test_c49_q1_flags_coded_per_class_save_a_tenth_of_the_exception_bits\n1 failed in 0.13s",
+          "drawn_at": "2026-10-22T08:22:36.934040+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_q1.json.gz",
+        "started": "2026-10-22T08:02:58.175214+00:00"
+      },
+      "pins": {
+        "tests/test_c49_q1_evidence.py": "a786bed723b1424899141e0d2fde1d9c7ace809f079d5dbeab23c6dde886a32f",
+        "harness/floor_q1.py": "3847616c7ce2835f5e29dcc05d55d22e6762fd4b411a122bb86cc2cb4884e4e0",
+        "scripts/c4_exception_classes.py": "5daa041a9765ea2066f90795c154634145594eaccce930b81e59acb7facca8fc"
+      },
+      "inconclusive_proof": "tests/test_c49_q1_evidence.py::test_c49_q1_the_flags_saving_is_undecidable"
+    },
+    "h316": {
+      "id": "h316",
+      "claim": "\u00a73.6 Q1: on the same sample, coding each exception's move tactics first (a bit for whether it is the tactics move, where that is one of the alternatives) saves at least a tenth of the leaves' coded exception bits. Refuted at no saving",
+      "mode": "test",
+      "proof": "tests/test_c49_q1_evidence.py::test_c49_q1_moves_coded_tactics_first_save_a_tenth_of_the_exception_bits",
+      "note": "User's choice (option 7 of the remaining levers, 2026-10-22). Piloted on L5's leaves (scratch, 42 leaves: exception rates 0.12-0.28% in every class, 43% of exceptions the tactics move; a 6-leaf smoke of this script: flags per class 806 against 694, moves 74 against 86 of 780 coded bits) \u2014 expected refuted for flags, inconclusive for moves. Fingerprint 0183157a95c4. floor_q1 15/15 mutants.",
+      "registered_at": "2026-10-22T08:02:57.083285+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_q1_evidence.py::test_c49_q1_moves_coded_tactics_first_save_a_tenth_of_the_exception_bits",
+          "ok": false,
+          "detail": "    - supported\nE         + inconclusive\n\ntests/test_c49_q1_evidence.py:35: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_q1_evidence.py::test_c49_q1_moves_coded_tactics_first_save_a_tenth_of_the_exception_bits\n1 failed in 0.05s",
+          "drawn_at": "2026-10-22T08:22:37.479434+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_q1.json.gz",
+        "started": "2026-10-22T08:02:58.175214+00:00"
+      },
+      "pins": {
+        "tests/test_c49_q1_evidence.py": "a786bed723b1424899141e0d2fde1d9c7ace809f079d5dbeab23c6dde886a32f",
+        "harness/floor_q1.py": "3847616c7ce2835f5e29dcc05d55d22e6762fd4b411a122bb86cc2cb4884e4e0",
+        "scripts/c4_exception_classes.py": "5daa041a9765ea2066f90795c154634145594eaccce930b81e59acb7facca8fc"
+      },
+      "inconclusive_proof": "tests/test_c49_q1_evidence.py::test_c49_q1_the_moves_saving_is_undecidable"
+    },
+    "h317": {
+      "id": "h317",
+      "claim": "\u00a73.6 N1: a small net paid once (the cells as the mover sees them and each move's safe / wins-in-two / loses-in-two facts, 32 hidden units, 4-bit weights, at most 20,000 bits), trained on solved positions drawn as D1's from F2's strategies away from L4's 32 roots, picks a move that keeps the win at all but at most 100 of D1's 4,523 positions \u2014 half the tactics order's 200 misses. Refuted at 200 or more",
+      "mode": "test",
+      "proof": "tests/test_c49_n1_evidence.py::test_c49_n1_a_20k_bit_net_misses_half_as_often_as_tactics",
+      "note": "User's choice (option 3, a learned default paid once). Pilot before any build: only a default much better than tactics could matter (L6, h301). Settings fixed before the run, no tuning on the test. A 94-position smoke (scratch) ran end to end. Fingerprint 99fa81b04d0a. learned_default 17/17, floor_n1 16/16 mutants.",
+      "registered_at": "2026-10-22T08:33:58.742095+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_n1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_n1_evidence.py": "513ec7795667e240eb7016d0c14018a0a5691089836a7b63e8e8c382371ec2e0",
+        "harness/floor_n1.py": "52001e4586cfbf76c163a3f3be187e097fb38bcc2c7eb6da29b5add7c04a5a44",
+        "harness/learned_default.py": "2ec04f29b357387b07c779581aeae18c4c86f52e3cea156031ad44bc35bf046f",
+        "scripts/c4_learned_default.py": "2f0643b511ed01356c0137dd48161cd59894efa30d21a3645e9308c277f83394",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f"
+      },
+      "inconclusive_proof": "tests/test_c49_n1_evidence.py::test_c49_n1_the_misses_are_undecidable"
     }
   }
 }

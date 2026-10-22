@@ -526,6 +526,20 @@ rule standalone and in decision-list order, by ply.
   - **K1 result (h304 supported, h305 + h306 refuted — pre-registered; h307 after the data): two-phase maps are a
     dead end.** 32/32 complete, 105,767 bits against L6's 102,289 (1.03); heavy 16 at 1.05. Only 7 of 759 maps used
     have a second phase; smaller on 13, larger on 18 (p = 0.47). Code stays, `phases` off by default.
+  - **R1 result (h312 supported — pre-registered, designed on F1 only): the whole game in 398,195 bits.** F2 paid
+    every leaf the full width of an index into its whole map list (library ~2,000 maps late in the game): 100,888
+    bits. `harness/reference_coding.py` first_use — the library maps a build uses named once (gamma count + which),
+    every leaf an Elias-gamma move-to-front rank in walk order, a build's own maps stored in order of first use (each
+    first use one NEW symbol) — codes them in 43,124: 12.7% of F2, no move changed. Judges of library builds (G1) now
+    code references this way; the builder still charges the fixed width while building.
+  - **Q1 result (h315 refuted, h316 inconclusive — pre-registered): exception coding is a dead end.** On 60 of F2's
+    excepted leaves, flags coded per class (levelled/default × tactics agrees or not) cost 11% more — exceptions fall
+    at the same rate everywhere; moves coded tactics first save 1.9% (half the exceptions play the tactics move).
+  - **Running 2026-10-22 (user's choice of options 5, 6, 2):** A7 — accept at 10x on F2's heavy 16 against B1's
+    control (h308, h309); F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
+    the heavy 16 from every map B1's control found, all within reach (`reuse_window` 100,000), references by
+    first_use, library maps paid once (h313, h314; queued after A7). N1 (option 3, a learned default paid once) is
+    being piloted next.
 
 ## 4. The hybrid process — definition of done
 

@@ -263,3 +263,20 @@
 {"event": "end", "id": "6c65fb5e656e", "status": "completed", "at": "2026-10-21T10:45:18+00:00", "seconds": 661.1}
 {"event": "start", "id": "9cb82cbd9a83", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_k1", "--workers", "4", "--out", "evidence/c49_k1.json.gz", "--progress", "checkpoints/runs/c49_k1_progress.json"], "at": "2026-10-21T14:55:25+00:00"}
 {"event": "end", "id": "9cb82cbd9a83", "status": "completed", "at": "2026-10-21T21:31:34+00:00", "seconds": 23769.0}
+{"event": "start", "id": "7d9669953c08", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_a7", "--workers", "4", "--out", "evidence/c49_a7.json.gz", "--progress", "checkpoints/runs/c49_a7_progress.json"], "at": "2026-10-22T07:36:32+00:00"}
+{"event": "start", "id": "ea971a293ed3", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_f3", "--workers", "4", "--out", "evidence/c49_f3.json.gz", "--progress", "checkpoints/runs/c49_f3_progress.json"], "at": "2026-10-22T07:38:51+00:00"}
+{"event": "start", "id": "54d97b8cd8a7", "name": "c4_reference_coding", "argv": ["--spec", "harness.floor_r1", "--out", "evidence/c49_r1.json.gz"], "at": "2026-10-22T07:48:56+00:00"}
+{"event": "end", "id": "54d97b8cd8a7", "status": "completed", "at": "2026-10-22T07:49:00+00:00", "seconds": 4.5}
+{"event": "start", "id": "5c1080a43ffe", "name": "c4_exception_classes", "argv": ["--spec", "q1_smoke_spec", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/q1.json.gz"], "at": "2026-10-22T08:00:58+00:00"}
+{"event": "end", "id": "5c1080a43ffe", "status": "completed", "at": "2026-10-22T08:01:59+00:00", "seconds": 60.6}
+{"event": "start", "id": "fcb92ac0342f", "name": "c4_exception_classes", "argv": ["--spec", "harness.floor_q1", "--out", "evidence/c49_q1.json.gz"], "at": "2026-10-22T08:02:58+00:00"}
+{"event": "start", "id": "05d459bcea75", "name": "c4_learned_default", "argv": ["--spec", "n1_smoke_spec", "--workers", "1", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/n1.json.gz"], "at": "2026-10-22T08:11:48+00:00"}
+{"event": "end", "id": "05d459bcea75", "status": "failed", "error": "TypeError: unhashable type: 'list'", "at": "2026-10-22T08:11:51+00:00", "seconds": 3.0}
+{"event": "start", "id": "5cf0bb9ce8ab", "name": "c4_learned_default", "argv": ["--spec", "n1_smoke_spec", "--workers", "1", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/n1.json.gz"], "at": "2026-10-22T08:12:06+00:00"}
+{"event": "end", "id": "fcb92ac0342f", "status": "completed", "at": "2026-10-22T08:13:05+00:00", "seconds": 607.0}
+{"event": "end", "id": "5cf0bb9ce8ab", "status": "failed", "error": "ValueError: every training position needs a safe move that keeps the win", "at": "2026-10-22T08:16:45+00:00", "seconds": 279.3}
+{"event": "start", "id": "35cc4ebdf0ae", "name": "c4_learned_default", "argv": ["--spec", "n1_smoke_spec", "--workers", "1", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/n1.json.gz"], "at": "2026-10-22T08:17:03+00:00"}
+{"event": "end", "id": "35cc4ebdf0ae", "status": "failed", "error": "ValueError: every training position needs a safe move that keeps the win", "at": "2026-10-22T08:22:21+00:00", "seconds": 318.2}
+{"event": "start", "id": "e32ede662051", "name": "c4_learned_default", "argv": ["--spec", "n1_smoke_spec", "--workers", "2", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/n1.json.gz"], "at": "2026-10-22T08:22:37+00:00"}
+{"event": "end", "id": "e32ede662051", "status": "completed", "at": "2026-10-22T08:33:13+00:00", "seconds": 635.7}
+{"event": "start", "id": "e05f3e48f84f", "name": "c4_learned_default", "argv": ["--spec", "harness.floor_n1", "--workers", "1", "--out", "evidence/c49_n1.json.gz"], "at": "2026-10-22T08:33:59+00:00"}

@@ -1,0 +1,134 @@
+{
+  "file": "harness/floor_n1.py",
+  "tests": ["tests/test_floor_n1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another test seed",
+      "old": "\"per_root\": 150, \"seed\": 0}",
+      "new": "\"per_root\": 150, \"seed\": 2}"
+    },
+    {
+      "name": "l4's roots trained on",
+      "old": ",\n                  \"skip\": L4[\"indices\"]}",
+      "new": "}"
+    },
+    {
+      "name": "a wider net",
+      "old": "\"hidden\": 32,",
+      "new": "\"hidden\": 64,"
+    },
+    {
+      "name": "8-bit weights",
+      "old": "\"weight_bits\": 4,",
+      "new": "\"weight_bits\": 8,"
+    },
+    {
+      "name": "another d1",
+      "old": "\"tactics\": 4_323}",
+      "new": "\"tactics\": 4_322}"
+    },
+    {
+      "name": "a bigger budget",
+      "old": "\"max_bits\": 20_000",
+      "new": "\"max_bits\": 40_000"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": 100",
+      "new": "\"support\": 150"
+    },
+    {
+      "name": "a looser refute",
+      "old": "\"refute\": 200}",
+      "new": "\"refute\": 250}"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "e.get(\"measurement_fingerprint\") != SPEC[\"measurement_fp\"] or ",
+      "new": ""
+    },
+    {
+      "name": "settings unchecked",
+      "old": "any(e.get(k) != SPEC[k] for k in",
+      "new": "any(False for k in"
+    },
+    {
+      "name": "d1 unreproduced",
+      "old": "\n            or any(t[k] != v for k, v in SPEC[\"d1\"].items())",
+      "new": ""
+    },
+    {
+      "name": "budget unchecked",
+      "old": " or t[\"bits\"] > SPEC[\"max_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "budget boundary",
+      "old": "t[\"bits\"] > SPEC[\"max_bits\"]",
+      "new": "t[\"bits\"] >= SPEC[\"max_bits\"]"
+    },
+    {
+      "name": "float net judged",
+      "old": "    misses = t[\"solved\"] - t[\"net\"]",
+      "new": "    misses = t[\"solved\"] - t[\"net_float\"]"
+    },
+    {
+      "name": "support boundary",
+      "old": "misses <= SPEC[\"support\"]",
+      "new": "misses < SPEC[\"support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "misses >= SPEC[\"refute\"]",
+      "new": "misses > SPEC[\"refute\"]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T08:33:50+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "another test seed": ["test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others"],
+      "l4's roots trained on": ["test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others"],
+      "a wider net": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others"
+      ],
+      "8-bit weights": ["test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others"],
+      "another d1": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others",
+        "test_the_net_is_judged_on_its_misses_against_the_tactics_order",
+        "test_the_quantized_net_is_judged_not_the_float_one"
+      ],
+      "a bigger budget": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others"
+      ],
+      "a looser support": [
+        "test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others",
+        "test_the_net_is_judged_on_its_misses_against_the_tactics_order"
+      ],
+      "a looser refute": [
+        "test_n1_tests_on_d1_s_positions_and_trains_on_f2_s_others",
+        "test_the_net_is_judged_on_its_misses_against_the_tactics_order",
+        "test_the_quantized_net_is_judged_not_the_float_one"
+      ],
+      "fingerprint unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "settings unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "d1 unreproduced": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "budget unchecked": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "budget boundary": ["test_a_measurement_off_its_registration_is_not_judged"],
+      "float net judged": ["test_the_quantized_net_is_judged_not_the_float_one"],
+      "support boundary": [
+        "test_a_measurement_off_its_registration_is_not_judged",
+        "test_the_net_is_judged_on_its_misses_against_the_tactics_order"
+      ],
+      "refute boundary": [
+        "test_the_net_is_judged_on_its_misses_against_the_tactics_order",
+        "test_the_quantized_net_is_judged_not_the_float_one"
+      ]
+    }
+  }
+}
