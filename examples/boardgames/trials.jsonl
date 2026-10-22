@@ -281,3 +281,5 @@
 {"event": "end", "id": "e32ede662051", "status": "completed", "at": "2026-10-22T08:33:13+00:00", "seconds": 635.7}
 {"event": "start", "id": "e05f3e48f84f", "name": "c4_learned_default", "argv": ["--spec", "harness.floor_n1", "--workers", "1", "--out", "evidence/c49_n1.json.gz"], "at": "2026-10-22T08:33:59+00:00"}
 {"event": "end", "id": "e05f3e48f84f", "status": "completed", "at": "2026-10-22T12:38:27+00:00", "seconds": 14668.6}
+{"event": "end", "id": "7d9669953c08", "status": "completed", "at": "2026-10-22T15:01:20+00:00", "seconds": 26688.0}
+{"event": "start", "id": "7c1962d72ca6", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g1", "--workers", "4", "--out", "evidence/c49_g1.json.gz", "--progress", "checkpoints/runs/c49_g1_progress.json"], "at": "2026-10-22T15:02:16+00:00"}

@@ -9089,10 +9089,17 @@
       "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_14_of_16_complete_within_2_hours_accepting_at_10x",
       "note": "User's choice (option 5 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built and judged under its own registration (h291/h292). Fingerprint 98b7fb6ebf7f. floor_a7 6/6 mutants.",
       "registered_at": "2026-10-22T07:36:24.857101+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_14_of_16_complete_within_2_hours_accepting_at_10x",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-22T18:37:32.637413+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_a7.json.gz",
-        "started": null
+        "started": "2026-10-22T07:36:32+00:00"
       },
       "pins": {
         "tests/test_c49_a7_evidence.py": "c6fe6346dbccafb2891077f637a7c238221cf6c6d455d2d466cf577c2c409f7d",
@@ -9114,10 +9121,25 @@
       "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller",
       "note": "User's choice (option 5 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built and judged under its own registration (h291/h292). Fingerprint 98b7fb6ebf7f. floor_a7 6/6 mutants.",
       "registered_at": "2026-10-22T07:36:25.245190+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "     - supported\nE         + inconclusive\n\ntests/test_c49_a7_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller\n1 failed in 0.10s",
+          "drawn_at": "2026-10-22T18:37:33.041024+00:00",
+          "inconclusive": true
+        },
+        {
+          "proof": "tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "     - supported\nE         + inconclusive\n\ntests/test_c49_a7_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a7_evidence.py::test_c49_a7_accepting_at_10x_makes_the_heavy_strategies_a_tenth_smaller\n1 failed in 0.09s",
+          "drawn_at": "2026-10-22T18:37:37.588901+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_a7.json.gz",
-        "started": null
+        "started": "2026-10-22T07:36:32+00:00"
       },
       "pins": {
         "tests/test_c49_a7_evidence.py": "c6fe6346dbccafb2891077f637a7c238221cf6c6d455d2d466cf577c2c409f7d",
@@ -9338,6 +9360,35 @@
         "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f"
       },
       "inconclusive_proof": "tests/test_c49_n1_evidence.py::test_c49_n1_the_misses_are_undecidable"
+    },
+    "h318": {
+      "id": "h318",
+      "claim": "\u00a73.6 A7 (registered after the data): the 10x bar's 7.5% is two positions, not the bar \u2014 the strategies are smaller on 7 of F2's 16 heaviest positions and larger on 9 (sign test p = 0.80), and two of them (#212: 9,518 -> 3,281; #113: 12,241 -> 8,427) hold 10,051 of the 7,893 bits saved. Leaves 2,597 -> 2,497, maps 766 -> 696 (58,299 -> 54,167 bits), exceptions 1,972 -> 1,800 (25,698 -> 23,439 bits)",
+      "mode": "test",
+      "proof": "tests/test_c49_a7_after_evidence.py::test_c49_a7_the_saving_is_two_positions_not_the_bar",
+      "note": "h308 supported (16/16 within 2 h), h309 inconclusive (96,967 against B1's control's 104,860 = 0.92; nine tenths needed) \u2014 pre-registered. Builds 27.1 CPU-hours against the control's 23.0. The bar joins search time, tie-break, forcing, map codes and two-phase maps: settled on the heavy tail, within run-to-run swing.",
+      "registered_at": "2026-10-22T18:38:34.002594+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a7_after_evidence.py::test_c49_a7_the_saving_is_two_positions_not_the_bar",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.18s",
+          "drawn_at": "2026-10-22T18:38:37.301001+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_a7.json.gz",
+          "started": "2026-10-22T07:36:32+00:00"
+        },
+        {
+          "path": "evidence/c49_b1_control.json.gz",
+          "started": "2026-10-20T08:39:48+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_a7_after_evidence.py": "cf1e3022e6d660f44a9789cd72417735f041075f4e5760932313fd4d8c1c1ad4"
+      }
     }
   }
 }

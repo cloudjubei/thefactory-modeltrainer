@@ -535,8 +535,10 @@ rule standalone and in decision-list order, by ply.
   - **Q1 result (h315 refuted, h316 inconclusive — pre-registered): exception coding is a dead end.** On 60 of F2's
     excepted leaves, flags coded per class (levelled/default × tactics agrees or not) cost 11% more — exceptions fall
     at the same rate everywhere; moves coded tactics first save 1.9% (half the exceptions play the tactics move).
-  - **Running 2026-10-22 (user's choice of options 5, 6, 2):** A7 — accept at 10x on F2's heavy 16 against B1's
-    control (h308, h309); F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
+  - **A7 result (h308 supported, h309 inconclusive — pre-registered; h318 after the data): the bar is settled.**
+    Accepting leaves at 10x on F2's heavy 16: all 16 complete within 2 h, 96,967 bits against B1's control's 104,860
+    (0.92, nine tenths needed). Smaller on 7, larger on 9 (p = 0.80); two positions hold the whole saving.
+  - **Running 2026-10-22 (user's choice of options 5, 6, 2):** F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
     the heavy 16 from every map B1's control found, all within reach (`reuse_window` 100,000), references by
     first_use, library maps paid once (h313, h314; queued after A7).
   - **N1 result (h317 supported — pre-registered): a learned default keeps the win where the orders miss.** A

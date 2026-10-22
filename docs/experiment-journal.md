@@ -5698,3 +5698,11 @@ held by the test dropped), it keeps the win at 82,695 of them (99.6% against 98.
 that buys a smaller strategy is open — D1's tactics order cut misses 35% and the heavy tail did not shrink — and only
 a build with the net as the default can say; that needs `choose` and the native walk changed, measured code under
 A7's and F3's fingerprint, so it waits for F3.
+
+The machine crashed in the evening (not my runs: they survived, F3 and G1 still building). A7 had ended at 17:01Z.
+A7 result: all 16 of F2's heaviest positions complete within 2 h at the 10x bar (h308 supported), 96,967 bits against
+B1's control's 104,860 — 0.92, short of nine tenths (h309 inconclusive). Root by root it is noise: smaller on 7,
+larger on 9 (p = 0.80), and #212 (9,518 -> 3,281) and #113 (12,241 -> 8,427) hold 10,051 of the 7,893 bits saved —
+the rest, together, grew (h318, after the data). Fewer leaves, maps and exceptions alike, 27.1 CPU-hours against 23.0.
+The bar joins search time, tie-break, forcing, map codes and two-phase maps as settled on the heavy tail.
+
