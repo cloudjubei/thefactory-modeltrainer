@@ -5691,3 +5691,10 @@ tactics hits; training positions drawn the same way from F2's strategies away fr
 dropped; all solved exactly). 32 hidden units, 4-bit weights: 19,996 bits. h317: at most 100 misses of 4,523 (half
 tactics'), refuted at 200. floor_n1 16/16. A 94-position smoke found the pooling walk ignored the run's tie-break
 order (fixed before registering). Chain PID 72346, 1 worker.
+
+N1 result (h317 supported): the net keeps the win at 4,461 of D1's 4,523 test positions — 62 misses against tactics'
+200 and lowest's 308 (both reproduce D1). Float net 4,463: 4-bit weights cost 2. Trained on 83,022 positions (125
+held by the test dropped), it keeps the win at 82,695 of them (99.6% against 98.6% on test). 19,996 bits. Whether
+that buys a smaller strategy is open — D1's tactics order cut misses 35% and the heavy tail did not shrink — and only
+a build with the net as the default can say; that needs `choose` and the native walk changed, measured code under
+A7's and F3's fingerprint, so it waits for F3.

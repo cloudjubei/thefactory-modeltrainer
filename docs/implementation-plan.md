@@ -538,8 +538,13 @@ rule standalone and in decision-list order, by ply.
   - **Running 2026-10-22 (user's choice of options 5, 6, 2):** A7 — accept at 10x on F2's heavy 16 against B1's
     control (h308, h309); F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
     the heavy 16 from every map B1's control found, all within reach (`reuse_window` 100,000), references by
-    first_use, library maps paid once (h313, h314; queued after A7). N1 (option 3, a learned default paid once) is
-    being piloted next.
+    first_use, library maps paid once (h313, h314; queued after A7).
+  - **N1 result (h317 supported — pre-registered): a learned default keeps the win where the orders miss.** A
+    19,996-bit net (`harness/learned_default.py`: cells as the mover sees them + each move's safe / wins-in-two /
+    loses-in-two facts, 32 hidden, 4-bit weights) trained on 83,022 solved positions from F2's strategies misses the
+    win at 62 of D1's 4,523 positions — tactics 200, lowest 308; float net 60. A pilot only: D1's 35% fewer misses
+    made no smaller heavy tail, so its worth is a build with it as the default — `choose` and the C walk, measured
+    code, so not before F3 ends.
 
 ## 4. The hybrid process — definition of done
 

@@ -280,3 +280,4 @@
 {"event": "start", "id": "e32ede662051", "name": "c4_learned_default", "argv": ["--spec", "n1_smoke_spec", "--workers", "2", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/smoke/n1.json.gz"], "at": "2026-10-22T08:22:37+00:00"}
 {"event": "end", "id": "e32ede662051", "status": "completed", "at": "2026-10-22T08:33:13+00:00", "seconds": 635.7}
 {"event": "start", "id": "e05f3e48f84f", "name": "c4_learned_default", "argv": ["--spec", "harness.floor_n1", "--workers", "1", "--out", "evidence/c49_n1.json.gz"], "at": "2026-10-22T08:33:59+00:00"}
+{"event": "end", "id": "e05f3e48f84f", "status": "completed", "at": "2026-10-22T12:38:27+00:00", "seconds": 14668.6}

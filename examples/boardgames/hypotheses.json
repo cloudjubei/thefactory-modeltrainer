@@ -9318,10 +9318,17 @@
       "proof": "tests/test_c49_n1_evidence.py::test_c49_n1_a_20k_bit_net_misses_half_as_often_as_tactics",
       "note": "User's choice (option 3, a learned default paid once). Pilot before any build: only a default much better than tactics could matter (L6, h301). Settings fixed before the run, no tuning on the test. A 94-position smoke (scratch) ran end to end. Fingerprint 99fa81b04d0a. learned_default 17/17, floor_n1 16/16 mutants.",
       "registered_at": "2026-10-22T08:33:58.742095+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_n1_evidence.py::test_c49_n1_a_20k_bit_net_misses_half_as_often_as_tactics",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.18s",
+          "drawn_at": "2026-10-22T12:38:59.428342+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_n1.json.gz",
-        "started": null
+        "started": "2026-10-22T08:34:02.911118+00:00"
       },
       "pins": {
         "tests/test_c49_n1_evidence.py": "513ec7795667e240eb7016d0c14018a0a5691089836a7b63e8e8c382371ec2e0",
