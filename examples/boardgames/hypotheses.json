@@ -9234,10 +9234,17 @@
       "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_14_of_16_complete_within_2_hours_with_every_map_in_reach",
       "note": "User's choice (option 6 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built (h291/h292). Library 766 maps; reuse_window 100,000 (no measured code changed \u2014 A7 and F3 were running). Timing probe: trying all 766 at a split position takes 0.19 s; 2 of 20 sampled split positions were covered by some library map. Queued to start when A7 finishes, 4 workers. Fingerprint 98b7fb6ebf7f. floor_g1 20/20 mutants.",
       "registered_at": "2026-10-22T07:53:25.182495+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_14_of_16_complete_within_2_hours_with_every_map_in_reach",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-22T19:11:08.109505+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_g1.json.gz",
-        "started": null
+        "started": "2026-10-22T15:02:16+00:00"
       },
       "pins": {
         "tests/test_c49_g1_evidence.py": "d7628d12f6c6fe835f11d18a99e044da5f60210bc43bdbbc0b1708b122819eaf",
@@ -9260,10 +9267,17 @@
       "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_shared_maps_make_the_heavy_strategies_a_tenth_smaller",
       "note": "User's choice (option 6 of the remaining levers, 2026-10-22). Arm only; the control is B1's, already built (h291/h292). Library 766 maps; reuse_window 100,000 (no measured code changed \u2014 A7 and F3 were running). Timing probe: trying all 766 at a split position takes 0.19 s; 2 of 20 sampled split positions were covered by some library map. Queued to start when A7 finishes, 4 workers. Fingerprint 98b7fb6ebf7f. floor_g1 20/20 mutants.",
       "registered_at": "2026-10-22T07:53:26.080719+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g1_evidence.py::test_c49_g1_shared_maps_make_the_heavy_strategies_a_tenth_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.33s",
+          "drawn_at": "2026-10-22T19:11:08.981121+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_g1.json.gz",
-        "started": null
+        "started": "2026-10-22T15:02:16+00:00"
       },
       "pins": {
         "tests/test_c49_g1_evidence.py": "d7628d12f6c6fe835f11d18a99e044da5f60210bc43bdbbc0b1708b122819eaf",
@@ -9389,6 +9403,85 @@
       "pins": {
         "tests/test_c49_a7_after_evidence.py": "cf1e3022e6d660f44a9789cd72417735f041075f4e5760932313fd4d8c1c1ad4"
       }
+    },
+    "h319": {
+      "id": "h319",
+      "claim": "\u00a73.6 G1 (registered after the data): the library's quarter is every position, not a few \u2014 smaller on 15 of F2's 16 heaviest positions, larger on 1 (sign test p = 0.0005). References by first_use, the strategies take 52,860 bits against B1's control's 99,319 and the 277 library maps they play 21,696 more; leaves 2,597 -> 1,513, own maps 766 -> 252, exceptions 1,972 -> 1,569. Of the 342 times a position plays a library map, 212 are maps the control found on that same position and 130 another's",
+      "mode": "test",
+      "proof": "tests/test_c49_g1_after_evidence.py::test_c49_g1_the_library_shrinks_every_position_but_one",
+      "note": "h313 supported (16/16), h314 supported (74,556 against 99,319 = 0.75) \u2014 pre-registered. 14.7 CPU-hours against the control's 23.0. A second build that starts from every map the first found, all within reach, is a quarter smaller: the first build's own maps (212 plays) more than the others' (130).",
+      "registered_at": "2026-10-22T19:12:12.659118+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g1_after_evidence.py::test_c49_g1_the_library_shrinks_every_position_but_one",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.24s",
+          "drawn_at": "2026-10-22T19:12:13.339185+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_g1.json.gz",
+          "started": "2026-10-22T15:02:16+00:00"
+        },
+        {
+          "path": "evidence/c49_b1_control.json.gz",
+          "started": "2026-10-20T08:39:48+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_g1_after_evidence.py": "720f8fdf660e2b96835c3ad53527bf800f741e4dd45e358dfa866e5ed9618db0"
+      }
+    },
+    "h320": {
+      "id": "h320",
+      "claim": "\u00a73.6 G2: built again with L5's rule and pipeline from every map F2 found, all within reach and no waves, every one of the opening's 671 frontier positions gets a complete certified strategy within 2 hours. Refuted when more than 7 do not finish",
+      "mode": "test",
+      "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_every_frontier_position_completes_from_f2_s_maps",
+      "note": "",
+      "registered_at": "2026-10-22T19:17:01.109182+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g2_evidence.py": "94de40ad548d8ed81887cb0ba92c5d7511ab2754ff09f3ed821fbe69a595c6e4",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g2_evidence.py::test_c49_g2_completion_is_undecidable"
+    },
+    "h321": {
+      "id": "h321",
+      "claim": "\u00a73.6 G2: built again from every map F2 found, all within reach, the certified first-player strategy for the whole game \u2014 the opening, every position's own bits with references coded by first_use and every library map a leaf plays paid once \u2014 takes no more than nine tenths of F2's 398,195 bits coded the same way. Refuted at F2's bits or more (an unfinished position counting without its references, a lower bound)",
+      "mode": "test",
+      "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_a_second_pass_makes_the_whole_game_a_tenth_smaller",
+      "note": "",
+      "registered_at": "2026-10-22T19:17:02.065716+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g2_evidence.py": "94de40ad548d8ed81887cb0ba92c5d7511ab2754ff09f3ed821fbe69a595c6e4",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g2_evidence.py::test_c49_g2_the_size_is_undecidable"
     }
   }
 }

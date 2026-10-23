@@ -5706,3 +5706,22 @@ larger on 9 (p = 0.80), and #212 (9,518 -> 3,281) and #113 (12,241 -> 8,427) hol
 the rest, together, grew (h318, after the data). Fewer leaves, maps and exceptions alike, 27.1 CPU-hours against 23.0.
 The bar joins search time, tie-break, forcing, map codes and two-phase maps as settled on the heavy tail.
 
+G1 result (h313 + h314 supported, h319 after the data): F2's heavy 16 built again from every one of the 766 maps B1's
+control found on them, all within reach — only reuse_window changed — complete 16/16 in 74,556 bits against the
+control's 99,319 (0.75): strategies 52,860 by first_use plus 21,696 for the 277 library maps they play, each paid
+once. Every position but one is smaller (15 of 16, p = 0.0005; #584 grows 2,859 -> 4,481), #467 falls to a single
+leaf. Leaves 2,597 -> 1,513, own maps 766 -> 252, exceptions 1,972 -> 1,569, 14.7 CPU-hours against 23.0. The maps
+that matter are mostly the position's own: 212 of the 342 library plays are maps the control found on the same
+position, 130 another's. So a build's first pass leaves maps it found but could not reach again (the 200-map window);
+a second pass with everything in reach is the first gain on the heavy tail that no rule change made.
+
+G2 registered and launched (G1 on the whole game): F2's 671 positions in F1's order, L5's rule and pipeline, no waves,
+every build starting from all 2,801 maps F2 found (`library_from` c49_f2, `reuse_window` 100,000) — no measured code
+changed, fingerprint 98b7fb6ebf7f as A7, F3 and G1. harness/floor_g2.py recomputes F2's whole game from its evidence
+by G1's first_use coding (exactly R1's 398,195: opening 1,075, L2's seed library 8,618, the positions) and refuses to
+judge if it does not come to that; G2's whole game is its opening, its positions by first_use and each library map a
+leaf plays paid once (the seed library is not in G2's). h320: all 671 complete (more than 7 unfinished refutes);
+h321: nine tenths of 398,195 or less supports, 398,195 or more refutes. 22/22 mutants (two vacuous tests found and
+fixed: an unfinished F2 that already failed the bits check; a boundary that needed a control divisible by ten).
+Chain shell PID 57435, 3 workers, alongside F3's 4 — the most at once after this evening's crash.
+

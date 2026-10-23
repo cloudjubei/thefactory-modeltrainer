@@ -1,0 +1,180 @@
+{
+  "file": "harness/floor_g2.py",
+  "tests": ["tests/test_floor_g2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "l5's window",
+      "old": "\"builder\": {**L5[\"builder\"], \"reuse_window\": 100_000}",
+      "new": "\"builder\": L5[\"builder\"]"
+    },
+    {
+      "name": "another window",
+      "old": "\"reuse_window\": 100_000}",
+      "new": "\"reuse_window\": 1_000}"
+    },
+    {
+      "name": "f2's seed library",
+      "old": "\"library_from\": \"c49_f2.json.gz\",\n        ",
+      "new": ""
+    },
+    {
+      "name": "waves kept",
+      "old": "(\"f1_bits\", \"wave_size\", \"library_bits\")",
+      "new": "(\"f1_bits\", \"library_bits\")"
+    },
+    {
+      "name": "seed bits kept",
+      "old": "(\"f1_bits\", \"wave_size\", \"library_bits\")",
+      "new": "(\"f1_bits\", \"wave_size\")"
+    },
+    {
+      "name": "f2's fingerprint",
+      "old": "\"measurement_fp\": K1[\"measurement_fp\"], ",
+      "new": ""
+    },
+    {
+      "name": "other f2 bits",
+      "old": "\"f2_bits\": 398_195}",
+      "new": "\"f2_bits\": 398_196}"
+    },
+    {
+      "name": "own completion judge",
+      "old": "g2_complete = f1_complete",
+      "new": "g2_complete = lambda e, spec: f1_complete(e, spec)"
+    },
+    {
+      "name": "library reversed",
+      "old": "g2_library = g1_library",
+      "new": "g2_library = lambda f2: g1_library(f2)[::-1]"
+    },
+    {
+      "name": "f2 unchecked",
+      "old": " or not f1_checked(f2, F2)",
+      "new": ""
+    },
+    {
+      "name": "f2 may be unfinished",
+      "old": " or not all(r[\"complete\"] for r in f2[\"roots\"])",
+      "new": ""
+    },
+    {
+      "name": "control without the seed library",
+      "old": " + F2[\"library_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "control not checked",
+      "old": "if control != spec[\"f2_bits\"]:",
+      "new": "if False:"
+    },
+    {
+      "name": "shared unchecked",
+      "old": "r[\"shared\"] != len(library) or ",
+      "new": ""
+    },
+    {
+      "name": "maps unchecked",
+      "old": " or r[\"maps\"][1:1 + len(library)] != [m for m, _ in library]",
+      "new": ""
+    },
+    {
+      "name": "map sizes unchecked",
+      "old": "\n                or r[\"map_empty\"][1:1 + len(library)] != [empty for _, empty in library]",
+      "new": ""
+    },
+    {
+      "name": "empty map paid",
+      "old": "if 1 <= n.get(\"leaf\", 0)",
+      "new": "if 0 <= n.get(\"leaf\", 0)"
+    },
+    {
+      "name": "arm without opening",
+      "old": "bits = _opening(e) + ",
+      "new": "bits = "
+    },
+    {
+      "name": "refuted above f2 only",
+      "old": "\"refuted\" if bits >= control",
+      "new": "\"refuted\" if bits > control"
+    },
+    {
+      "name": "unfinished may support",
+      "old": "\"supported\" if not lower and ",
+      "new": "\"supported\" if "
+    },
+    {
+      "name": "strict nine tenths",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "references unrecoded",
+      "old": "bits = _opening(e) + sum(_coded(r) for r in e[\"roots\"])",
+      "new": "bits = _opening(e) + sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-22T19:16:37+00:00",
+    "killed": 22,
+    "survived": [],
+    "killed_by": {
+      "l5's window": [
+        "test_a_run_off_either_registration_is_not_judged",
+        "test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"
+      ],
+      "another window": ["test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"],
+      "f2's seed library": ["test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"],
+      "waves kept": ["test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"],
+      "seed bits kept": ["test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"],
+      "f2's fingerprint": [
+        "test_a_run_off_either_registration_is_not_judged",
+        "test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"
+      ],
+      "other f2 bits": ["test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"],
+      "own completion judge": [
+        "test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach"
+      ],
+      "library reversed": [
+        "test_a_build_that_did_not_start_from_f2_s_maps_is_not_judged",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_f2_must_be_complete_and_come_to_its_registered_bits",
+        "test_g2_is_f2_built_once_more_from_every_map_f2_found_all_in_reach",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_f2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "f2 unchecked": ["test_a_run_off_either_registration_is_not_judged"],
+      "f2 may be unfinished": ["test_f2_must_be_complete_and_come_to_its_registered_bits"],
+      "control without the seed library": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_f2_must_be_complete_and_come_to_its_registered_bits",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_f2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "control not checked": ["test_f2_must_be_complete_and_come_to_its_registered_bits"],
+      "shared unchecked": ["test_a_build_that_did_not_start_from_f2_s_maps_is_not_judged"],
+      "maps unchecked": ["test_a_build_that_did_not_start_from_f2_s_maps_is_not_judged"],
+      "map sizes unchecked": ["test_a_build_that_did_not_start_from_f2_s_maps_is_not_judged"],
+      "empty map paid": ["test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library"],
+      "arm without opening": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_f2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "refuted above f2 only": ["test_the_verdict_is_judged_against_f2_s_bits"],
+      "unfinished may support": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "strict nine tenths": ["test_the_verdict_is_judged_against_f2_s_bits"],
+      "references unrecoded": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_f2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ]
+    }
+  }
+}

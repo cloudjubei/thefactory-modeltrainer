@@ -538,6 +538,15 @@ rule standalone and in decision-list order, by ply.
   - **A7 result (h308 supported, h309 inconclusive — pre-registered; h318 after the data): the bar is settled.**
     Accepting leaves at 10x on F2's heavy 16: all 16 complete within 2 h, 96,967 bits against B1's control's 104,860
     (0.92, nine tenths needed). Smaller on 7, larger on 9 (p = 0.80); two positions hold the whole saving.
+  - **G1 result (h313 + h314 supported — pre-registered; h319 after the data): a second build from every map is a
+    quarter smaller.** F2's heavy 16 built again from all 766 maps B1's control found on them, `reuse_window` 100,000
+    (no code changed): 16/16, 74,556 bits against the control's 99,319 (0.75), references by first_use and the 277
+    library maps played paid once. Smaller on 15 of 16 (p = 0.0005); leaves 2,597 -> 1,513, own maps 766 -> 252;
+    212 of 342 library plays are the same position's own earlier maps. 14.7 CPU-hours against 23.0.
+  - **Running 2026-10-22: G2 — G1 on the whole game.** F2's 671 positions built again with L5 from all 2,801 maps
+    F2 found, `reuse_window` 100,000, no waves; judged (`harness/floor_g2.py`, 22/22 mutants) against F2's 398,195
+    recomputed from its evidence by the same code — h320 (all complete, more than 7 unfinished refutes), h321 (nine
+    tenths). 3 workers beside F3's 4 (staggered: two runs at most).
   - **Running 2026-10-22 (user's choice of options 5, 6, 2):** F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
     the heavy 16 from every map B1's control found, all within reach (`reuse_window` 100,000), references by
     first_use, library maps paid once (h313, h314; queued after A7).
