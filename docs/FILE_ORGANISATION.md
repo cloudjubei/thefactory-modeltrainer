@@ -21,8 +21,8 @@
 - `runner/` — the compute runner agent (`agent.mjs`: PIN pair + long-poll job loop, reusing
   thefactory-tools' spawn + data-cache primitives; `Dockerfile`; `README.md`). A program, not
   library code — exercised by the full-stack E2E, no vitest.
-- `viewer/` — the no-build static **hub app** (`index.html`, `app.js`, `bridge.js`,
-  `style.css`), served via the project's `appDir: "viewer"` config (set in project settings):
+- `viewer/` — the no-build static **hub app** (`index.html`, `app.js`, `style.css`;
+  `window.OverseerBridge` is the shared bridge Overseer serves at `bridge.js` beside the page), served via the project's `appDir: "viewer"` config (set in project settings):
   a home screen of registered training projects (directories) + a per-project dashboard
   (runs/launch/judge/hypotheses/papers/xai/charts). Pure decision logic the viewer can't unit-test
   in-place lives in dual-loaded IIFE modules (`hypothesis.js`, `migrate.js`, `xai.js` — exported to

@@ -2590,6 +2590,15 @@ function resetDashboardState() {
 function trainerDataCapabilityManifest(m) {
   return window.TrainerCapabilities.buildTrainerDataCapabilityManifest(m.recordType)
 }
+// Declared once on load, before any project opens, so the activity chip offers CLI for
+// `research-training-papers` alone; reportDataCapabilities adds the record types once a project is open.
+function reportActivityCapabilities() {
+  if (!window.OverseerBridge || !window.OverseerBridge.embedded) return
+  window.OverseerBridge.reportCapabilities({
+    activitiesApiOnly: true,
+    cliActivities: ['research-training-papers'],
+  }).catch(function () {})
+}
 function reportDataCapabilities() {
   if (!window.OverseerBridge || !window.OverseerBridge.embedded || !manifest) return
   window.OverseerBridge.reportCapabilities({
@@ -22069,6 +22078,7 @@ function setupVisibilityResume() {
   window.addEventListener('focus', onViewerVisible)
 }
 async function init() {
+  reportActivityCapabilities()
   setupHome()
   setupRunners()
   setupRuns()

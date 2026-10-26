@@ -5725,3 +5725,30 @@ h321: nine tenths of 398,195 or less supports, 398,195 or more refutes. 22/22 mu
 fixed: an unfinished F2 that already failed the bits check; a boundary that needed a control divisible by ten).
 Chain shell PID 57435, 3 workers, alongside F3's 4 — the most at once after this evening's crash.
 
+G2 result (h320 + h321 supported, pre-registered; h322 after the data), 2026-10-25 23:14Z: F2's 671 positions built
+again from every one of the 2,801 maps F2 found, all within reach — only reuse_window changed — complete 671/671, and
+the whole game takes 293,843 bits against F2's 398,195 coded the same way (0.738): opening 1,075, strategies 202,670
+by first_use, and 90,098 for the 1,099 library maps they play, each paid once. Root by root it is the whole game, not
+a tail: smaller on 540, larger on 102, equal on 29 (p < 1e-70); the largest savings #216 (−6,176), #605 (−5,147),
+#113 (−5,022), the largest growth #367 (+612). Leaves 9,495 -> 6,841, own maps 2,801 -> 931, exceptions 8,354 -> 3,581;
+219 CPU-hours against F2's 216 (the machine was overloaded by other processes for part of it). Unlike G1, where the
+position's own maps mattered most, here 1,920 of the 2,661 library plays are maps F2 found on another position, 741 on
+the same one: across the whole game the library is shared, not only reused where it was found. The best certified
+first-player description is now 293,843 bits. F3 is still running.
+
+F3 result (h310 supported, h311 inconclusive, pre-registered; h323 after the data), finished 2026-10-26 00:53Z: F2's
+671 positions rebuilt with L6's tie-break complete 671/671 in 422,227 bits against F2's 455,959 (0.926 — nine tenths
+needed). Ten positions hold 32,763 of the 33,732 bits saved (#113 −6,282, #467 −5,661, #216 −4,670); smaller on 335,
+larger on 246 (#616 +4,523), equal on 90 — the rest cancels. Leaves 9,495 -> 8,722, own maps 2,801 -> 2,553,
+exceptions 8,354 -> 8,612; 297 CPU-hours against 216. As on the heavy tail (h300, h301): the tie-break is a few large
+wins, not a rule that shrinks the game. By first_use F3's whole game is 370,497, against G2's 293,843.
+
+G3 registered and launched (user's choice after G2): the whole game a third time, every build starting from every
+map G2's whole game holds — the 1,099 F2 maps its leaves play, in F2's order, then G2's own 931 in root order, 2,030
+in all (harness/floor_g3.py `played_library`/`g3_library`). scripts/c4_strategy_s2.py reads a library only as an
+earlier file's found_maps, so scripts/c4_library_file.py writes it as one (evidence/c49_g3_library.json.gz) — no
+measured code changed, fingerprint 98b7fb6ebf7f as F2 and G2; the judge recomputes the library from G2's and F2's
+evidence and refuses any build that did not start from it, so the file is a convenience, not a proof. The control
+is G2's whole game recomputed by g2_size (must be 293,843). h324: all 671 complete (more than 7 unfinished refutes);
+h325: nine tenths of 293,843 or less supports, 293,843 or more refutes. 23/23 mutants (one first killed vacuously —
+`sorted(reverse=True, iterable=…)` is a TypeError — replaced). Chain PID 46773, 4 workers, the only run.

@@ -254,8 +254,8 @@ env and rewards, in its own Python + `.factory/trainer.json`).
   ALREADY mounted: the host PUSHes `nav.open` (a fire-and-forget `{view, params}` message from
   `buildNavOpenMessage`) whenever the App-tab route query changes, so clicking a chat link while sitting on
   the trainer App tab re-navigates the running viewer. `ProjectAppView` (web + native) owns the push effect
-  (`shouldPushDeepLink` — never fires on a mount/remount baseline, which the boot pull covers); the viewer's
-  `bridge.js` receives it via `OverseerBridge.onNavOpen` and applies it through the same idempotent
+  (`shouldPushDeepLink` — never fires on a mount/remount baseline, which the boot pull covers); the viewer
+  receives it via the shared bridge's `OverseerBridge.onNavOpen` and applies it through the same idempotent
   `applyDeepLink` path.
 - **One standard "work on this" affordance** — `iconStorySvg` + an always-on callout — everywhere a
   view creates a story/feature: paper coverage gaps + proposed improvements (stories via

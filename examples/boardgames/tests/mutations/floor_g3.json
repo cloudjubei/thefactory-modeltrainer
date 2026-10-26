@@ -1,0 +1,208 @@
+{
+  "file": "harness/floor_g3.py",
+  "tests": ["tests/test_floor_g3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another library file",
+      "old": "\"library_from\": \"c49_g3_library.json.gz\"",
+      "new": "\"library_from\": \"c49_g2.json.gz\""
+    },
+    {
+      "name": "other g2 bits",
+      "old": "\"g2_bits\": 293_843}",
+      "new": "\"g2_bits\": 293_844}"
+    },
+    {
+      "name": "sources swapped",
+      "old": "(\"c49_g2.json.gz\", \"c49_f2.json.gz\")",
+      "new": "(\"c49_f2.json.gz\", \"c49_g2.json.gz\")"
+    },
+    {
+      "name": "own completion judge",
+      "old": "g3_complete = f1_complete",
+      "new": "g3_complete = lambda e, spec: f1_complete(e, spec)"
+    },
+    {
+      "name": "library in reverse order",
+      "old": "return [library[i - 1] for i in played]",
+      "new": "return [library[i - 1] for i in played[::-1]]"
+    },
+    {
+      "name": "own maps left out",
+      "old": " + [m for r in e[\"roots\"] for m in r[\"found_maps\"]]",
+      "new": ""
+    },
+    {
+      "name": "own maps first",
+      "old": "return [library[i - 1] for i in played] + [m for r in e[\"roots\"] for m in r[\"found_maps\"]]",
+      "new": "return [m for r in e[\"roots\"] for m in r[\"found_maps\"]] + [library[i - 1] for i in played]"
+    },
+    {
+      "name": "last library map missed",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)})\n    return",
+      "new": "if 1 <= n.get(\"leaf\", 0) < len(library)})\n    return"
+    },
+    {
+      "name": "empty map as library",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)})\n    return",
+      "new": "if 0 <= n.get(\"leaf\", 0) <= len(library)})\n    return"
+    },
+    {
+      "name": "all of f2's maps",
+      "old": "return played_library(g2, g1_library(f2))",
+      "new": "return g1_library(f2)"
+    },
+    {
+      "name": "unfinished g2 judged",
+      "old": " or control[\"lower_bound\"]",
+      "new": ""
+    },
+    {
+      "name": "g2 bits unchecked",
+      "old": "\n            or control[\"bits\"] != spec[\"g2_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "g2 at its own registration",
+      "old": "{**G2, \"f2_bits\": spec[\"f2_bits\"]}",
+      "new": "G2"
+    },
+    {
+      "name": "g3 unchecked",
+      "old": "not f1_checked(e, spec) or ",
+      "new": ""
+    },
+    {
+      "name": "shared unchecked",
+      "old": "r[\"shared\"] != len(library) or ",
+      "new": ""
+    },
+    {
+      "name": "maps unchecked",
+      "old": " or r[\"maps\"][1:1 + len(library)] != [m for m, _ in library]",
+      "new": ""
+    },
+    {
+      "name": "empties unchecked",
+      "old": "\n                or r[\"map_empty\"][1:1 + len(library)] != [empty for _, empty in library]",
+      "new": ""
+    },
+    {
+      "name": "last library map unpaid",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)}\n",
+      "new": "if 1 <= n.get(\"leaf\", 0) < len(library)}\n"
+    },
+    {
+      "name": "paid per play",
+      "old": "    played = {n[\"leaf\"] for r in e[\"roots\"] for _, _, n in r[\"nodes\"] if 1 <= n.get(\"leaf\", 0) <= len(library)}\n",
+      "new": "    played = [n[\"leaf\"] for r in e[\"roots\"] for _, _, n in r[\"nodes\"] if 1 <= n.get(\"leaf\", 0) <= len(library)]\n"
+    },
+    {
+      "name": "any root finished",
+      "old": "lower = not all(r[\"complete\"]",
+      "new": "lower = not any(r[\"complete\"]"
+    },
+    {
+      "name": "strict nine tenths",
+      "old": "den * bits <= num",
+      "new": "den * bits < num"
+    },
+    {
+      "name": "refuted only above",
+      "old": "if bits >= control[\"bits\"]",
+      "new": "if bits > control[\"bits\"]"
+    },
+    {
+      "name": "opening left out",
+      "old": "bits = e[\"opening\"][\"moves\"] * 4 + e[\"opening\"][\"trivial\"] + sum",
+      "new": "bits = sum"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-26T07:36:45+00:00",
+    "killed": 23,
+    "survived": [],
+    "killed_by": {
+      "another library file": [
+        "test_g3_is_g2_built_once_more_from_every_map_g2_s_whole_game_holds"
+      ],
+      "other g2 bits": ["test_g3_is_g2_built_once_more_from_every_map_g2_s_whole_game_holds"],
+      "sources swapped": ["test_g3_is_g2_built_once_more_from_every_map_g2_s_whole_game_holds"],
+      "own completion judge": [
+        "test_g3_is_g2_built_once_more_from_every_map_g2_s_whole_game_holds"
+      ],
+      "library in reverse order": [
+        "test_a_whole_game_s_maps_are_the_library_maps_it_plays_in_library_order_then_its_own_in_root_order"
+      ],
+      "own maps left out": [
+        "test_a_whole_game_s_maps_are_the_library_maps_it_plays_in_library_order_then_its_own_in_root_order",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_library_is_what_g2_plays_of_f2_s_maps_and_what_g2_found",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "own maps first": [
+        "test_a_build_that_did_not_start_from_g3_s_library_is_not_judged",
+        "test_a_whole_game_s_maps_are_the_library_maps_it_plays_in_library_order_then_its_own_in_root_order",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_library_is_what_g2_plays_of_f2_s_maps_and_what_g2_found",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "last library map missed": [
+        "test_a_whole_game_s_maps_are_the_library_maps_it_plays_in_library_order_then_its_own_in_root_order",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_library_is_what_g2_plays_of_f2_s_maps_and_what_g2_found",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "empty map as library": [
+        "test_a_whole_game_s_maps_are_the_library_maps_it_plays_in_library_order_then_its_own_in_root_order"
+      ],
+      "all of f2's maps": [
+        "test_a_build_that_did_not_start_from_g3_s_library_is_not_judged",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_library_is_what_g2_plays_of_f2_s_maps_and_what_g2_found",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "unfinished g2 judged": ["test_g2_must_be_judged_complete_at_its_registered_bits"],
+      "g2 bits unchecked": ["test_g2_must_be_judged_complete_at_its_registered_bits"],
+      "g2 at its own registration": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "g3 unchecked": ["test_a_run_off_its_registration_is_not_judged"],
+      "shared unchecked": ["test_a_build_that_did_not_start_from_g3_s_library_is_not_judged"],
+      "maps unchecked": ["test_a_build_that_did_not_start_from_g3_s_library_is_not_judged"],
+      "empties unchecked": ["test_a_build_that_did_not_start_from_g3_s_library_is_not_judged"],
+      "last library map unpaid": [
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "paid per play": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ],
+      "any root finished": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "strict nine tenths": ["test_the_verdict_is_judged_against_g2_s_bits"],
+      "refuted only above": ["test_the_verdict_is_judged_against_g2_s_bits"],
+      "opening left out": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_verdict_is_judged_against_g2_s_bits",
+        "test_the_whole_game_is_the_opening_the_strategies_by_first_use_and_each_played_library_map_once"
+      ]
+    }
+  }
+}

@@ -285,3 +285,6 @@
 {"event": "start", "id": "7c1962d72ca6", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g1", "--workers", "4", "--out", "evidence/c49_g1.json.gz", "--progress", "checkpoints/runs/c49_g1_progress.json"], "at": "2026-10-22T15:02:16+00:00"}
 {"event": "end", "id": "7c1962d72ca6", "status": "completed", "at": "2026-10-22T19:10:16+00:00", "seconds": 14880.5}
 {"event": "start", "id": "5db54e1f65ca", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g2", "--workers", "3", "--out", "evidence/c49_g2.json.gz", "--progress", "checkpoints/runs/c49_g2_progress.json"], "at": "2026-10-22T19:17:09+00:00"}
+{"event": "end", "id": "5db54e1f65ca", "status": "completed", "at": "2026-10-25T23:16:11+00:00", "seconds": 273542.4}
+{"event": "end", "id": "ea971a293ed3", "status": "completed", "at": "2026-10-26T00:53:57+00:00", "seconds": 321306.1}
+{"event": "start", "id": "189f0371191f", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g3", "--workers", "4", "--out", "evidence/c49_g3.json.gz", "--progress", "checkpoints/runs/c49_g3_progress.json"], "at": "2026-10-26T07:38:16+00:00"}

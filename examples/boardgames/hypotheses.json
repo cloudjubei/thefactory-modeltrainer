@@ -9161,10 +9161,17 @@
       "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_every_frontier_position_completes",
       "note": "User's choice (option 2 of the remaining levers, 2026-10-22). F2 with only L6's tie-break changed; same order, waves, seed library and cap. Fingerprint 98b7fb6ebf7f. floor_f3 6/6 mutants. Expected from L6 (light 0.66, heavy 0.97): about 0.85-0.95 of F2.",
       "registered_at": "2026-10-22T07:38:49.090982+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_every_frontier_position_completes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.23s",
+          "drawn_at": "2026-10-26T07:32:02.864645+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_f3.json.gz",
-        "started": null
+        "started": "2026-10-22T07:38:51+00:00"
       },
       "pins": {
         "tests/test_c49_f3_evidence.py": "5f7406bb149a253142c7c66965bc536a6bc046b1949c195ff0d6351d75ec45a0",
@@ -9184,10 +9191,18 @@
       "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_the_whole_strategy_is_a_tenth_smaller_than_f2_s",
       "note": "User's choice (option 2 of the remaining levers, 2026-10-22). F2 with only L6's tie-break changed; same order, waves, seed library and cap. Fingerprint 98b7fb6ebf7f. floor_f3 6/6 mutants. Expected from L6 (light 0.66, heavy 0.97): about 0.85-0.95 of F2.",
       "registered_at": "2026-10-22T07:38:50.089169+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f3_evidence.py::test_c49_f3_the_whole_strategy_is_a_tenth_smaller_than_f2_s",
+          "ok": false,
+          "detail": "      \nE         - supported\nE         + inconclusive\n\ntests/test_c49_f3_evidence.py:36: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_f3_evidence.py::test_c49_f3_the_whole_strategy_is_a_tenth_smaller_than_f2_s\n1 failed in 2.39s",
+          "drawn_at": "2026-10-26T07:32:08.137744+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_f3.json.gz",
-        "started": null
+        "started": "2026-10-22T07:38:51+00:00"
       },
       "pins": {
         "tests/test_c49_f3_evidence.py": "5f7406bb149a253142c7c66965bc536a6bc046b1949c195ff0d6351d75ec45a0",
@@ -9440,10 +9455,17 @@
       "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_every_frontier_position_completes_from_f2_s_maps",
       "note": "",
       "registered_at": "2026-10-22T19:17:01.109182+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_every_frontier_position_completes_from_f2_s_maps",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 7.77s",
+          "drawn_at": "2026-10-25T23:22:32.117204+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_g2.json.gz",
-        "started": null
+        "started": "2026-10-22T19:17:09+00:00"
       },
       "pins": {
         "tests/test_c49_g2_evidence.py": "94de40ad548d8ed81887cb0ba92c5d7511ab2754ff09f3ed821fbe69a595c6e4",
@@ -9465,10 +9487,17 @@
       "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_a_second_pass_makes_the_whole_game_a_tenth_smaller",
       "note": "",
       "registered_at": "2026-10-22T19:17:02.065716+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g2_evidence.py::test_c49_g2_a_second_pass_makes_the_whole_game_a_tenth_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 14.54s",
+          "drawn_at": "2026-10-25T23:22:58.007841+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_g2.json.gz",
-        "started": null
+        "started": "2026-10-22T19:17:09+00:00"
       },
       "pins": {
         "tests/test_c49_g2_evidence.py": "94de40ad548d8ed81887cb0ba92c5d7511ab2754ff09f3ed821fbe69a595c6e4",
@@ -9482,6 +9511,119 @@
         "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
       },
       "inconclusive_proof": "tests/test_c49_g2_evidence.py::test_c49_g2_the_size_is_undecidable"
+    },
+    "h322": {
+      "id": "h322",
+      "claim": "\u00a73.6 G2 (registered after the data): the second pass shrinks the whole game, not a few positions \u2014 smaller on 540 of the 671, larger on 102, equal on 29 (sign test p < 1e-70). References by first_use, the strategies take 202,670 bits against F2's 388,502 and the 1,099 of F2's 2,801 found maps they play 90,098 more; leaves 9,495 -> 6,841, own maps 2,801 -> 931, exceptions 8,354 -> 3,581. Of the 2,661 times a position plays a library map, 741 are maps F2 found on that same position and 1,920 another's",
+      "mode": "test",
+      "proof": "tests/test_c49_g2_after_evidence.py::test_c49_g2_the_second_pass_shrinks_most_positions_and_shares_maps_across_them",
+      "note": "h320 supported (671/671), h321 supported (293,843 against 398,195 = 0.738) \u2014 pre-registered. 219 CPU-hours against F2's 216. Unlike G1, most plays are maps found on another position (1,920 vs 741): the library is shared across the game, not only reused where it was found.",
+      "registered_at": "2026-10-25T23:24:27.550425+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g2_after_evidence.py::test_c49_g2_the_second_pass_shrinks_most_positions_and_shares_maps_across_them",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 16.81s",
+          "drawn_at": "2026-10-25T23:25:11.927040+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_g2.json.gz",
+          "started": "2026-10-22T19:17:09+00:00"
+        },
+        {
+          "path": "evidence/c49_f2.json.gz",
+          "started": "2026-10-17T07:16:53+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_g2_after_evidence.py": "15ddfc72e36ac38fee3b73417ad8118e094ac355c7596764fb16d56acb0c9325",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h323": {
+      "id": "h323",
+      "claim": "\u00a73.6 F3 (registered after the data): L6's tie-break saves the whole game 33,732 bits (422,227 against F2's 455,959, 0.93) and ten positions hold 32,763 of them \u2014 smaller on 335 of the 671, larger on 246, equal on 90 (sign test p = 0.0003), the rest cancelling. Leaves 9,495 -> 8,722, own maps 2,801 -> 2,553, exceptions 8,354 -> 8,612; 297 CPU-hours against F2's 216",
+      "mode": "test",
+      "proof": "tests/test_c49_f3_after_evidence.py::test_c49_f3_the_tie_break_s_saving_is_ten_positions",
+      "note": "h310 supported (671/671), h311 inconclusive (0.926; nine tenths needed) \u2014 pre-registered. As on the heavy tail (h300, h301), the tie-break is a few large wins and noise elsewhere; G2's second pass (0.74 of F2 by first_use) is far larger. By first_use F3's whole game is 370,497.",
+      "registered_at": "2026-10-26T07:33:38.236964+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f3_after_evidence.py::test_c49_f3_the_tie_break_s_saving_is_ten_positions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 5.20s",
+          "drawn_at": "2026-10-26T07:33:54.386652+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_f3.json.gz",
+          "started": "2026-10-22T07:38:51+00:00"
+        },
+        {
+          "path": "evidence/c49_f2.json.gz",
+          "started": "2026-10-17T07:16:53+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_f3_after_evidence.py": "1e532271e103af67bff2e2f1dd51af5d180a29b1aca40579aeb4e07781883fcd"
+      }
+    },
+    "h324": {
+      "id": "h324",
+      "claim": "\u00a73.6 G3: built a third time with L5's rule and pipeline from every map G2's whole game holds (the 1,099 of F2's maps it plays and its own 931), all within reach and no waves, every one of the opening's 671 frontier positions gets a complete certified strategy within 2 hours. Refuted when more than 7 do not finish",
+      "mode": "test",
+      "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_every_frontier_position_completes_from_g2_s_maps",
+      "note": "User's choice 2026-10-26 after G2 (h321, 0.74 of F2): a third pass, keep passing while a pass gains a tenth. Library 2,030 maps (harness.floor_g3.g3_library), written by scripts/c4_library_file.py; reuse_window 100,000; fingerprint 98b7fb6ebf7f as F2, G2 \u2014 no measured code changed.",
+      "registered_at": "2026-10-26T07:37:56.485633+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g3.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g3_evidence.py": "12a7db68aad6bd53d4d31c9b3eace08e7ea21b100797140b50a91613289f3ad2",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g3_evidence.py::test_c49_g3_completion_is_undecidable"
+    },
+    "h325": {
+      "id": "h325",
+      "claim": "\u00a73.6 G3: built a third time from every map G2's whole game holds, all within reach, the certified first-player strategy for the whole game \u2014 the opening, every position's own bits with references coded by first_use and every library map a leaf plays paid once \u2014 takes no more than nine tenths of G2's 293,843 bits coded the same way. Refuted at G2's bits or more (an unfinished position counting without its references, a lower bound)",
+      "mode": "test",
+      "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_a_third_pass_makes_the_whole_game_a_tenth_smaller_again",
+      "note": "User's choice 2026-10-26 after G2 (h321, 0.74 of F2). Control recomputed from G2's and F2's evidence (harness.floor_g2.g2_size) and must come to 293,843. Inconclusive or refuted = the second pass took the library's gain.",
+      "registered_at": "2026-10-26T07:37:57.126341+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_g3.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_g3_evidence.py": "12a7db68aad6bd53d4d31c9b3eace08e7ea21b100797140b50a91613289f3ad2",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_k1.py": "d6c57c78070d0019e01c75db342b9b84b33c798086f6aea7556d59cebcf56b68",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g3_evidence.py::test_c49_g3_the_size_is_undecidable"
     }
   }
 }

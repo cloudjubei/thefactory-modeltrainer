@@ -543,13 +543,20 @@ rule standalone and in decision-list order, by ply.
     (no code changed): 16/16, 74,556 bits against the control's 99,319 (0.75), references by first_use and the 277
     library maps played paid once. Smaller on 15 of 16 (p = 0.0005); leaves 2,597 -> 1,513, own maps 766 -> 252;
     212 of 342 library plays are the same position's own earlier maps. 14.7 CPU-hours against 23.0.
-  - **Running 2026-10-22: G2 — G1 on the whole game.** F2's 671 positions built again with L5 from all 2,801 maps
-    F2 found, `reuse_window` 100,000, no waves; judged (`harness/floor_g2.py`, 22/22 mutants) against F2's 398,195
-    recomputed from its evidence by the same code — h320 (all complete, more than 7 unfinished refutes), h321 (nine
-    tenths). 3 workers beside F3's 4 (staggered: two runs at most).
-  - **Running 2026-10-22 (user's choice of options 5, 6, 2):** F3 — the whole game rebuilt with L6's tie-break, against F2 (h310, h311; ~62 h); G1 —
-    the heavy 16 from every map B1's control found, all within reach (`reuse_window` 100,000), references by
-    first_use, library maps paid once (h313, h314; queued after A7).
+  - **G2 result (h320 + h321 supported — pre-registered; h322 after the data): a second pass makes the whole game a
+    quarter smaller.** F2's 671 positions built again with L5 from all 2,801 maps F2 found, `reuse_window` 100,000,
+    no waves, no code changed: 671/671 complete, the whole game 293,843 bits against F2's 398,195 by the same
+    first_use code (0.74) — opening 1,075, strategies 202,670, the 1,099 library maps played 90,098. Smaller on 540,
+    larger on 102, equal on 29 (p < 1e-70); leaves 9,495 -> 6,841, own maps 2,801 -> 931. 1,920 of 2,661 library
+    plays are maps found on another position: the library is shared across the game. 219 CPU-hours against 216.
+  - **F3 result (h310 supported, h311 inconclusive — pre-registered; h323 after the data): the tie-break is ten
+    positions.** F2 rebuilt with L6's rule: 671/671, 422,227 bits against F2's 455,959 (0.93, nine tenths needed);
+    ten positions hold 32,763 of the 33,732 bits saved (smaller on 335, larger on 246). 297 CPU-hours against 216.
+  - **Running 2026-10-26 (user's choice): G3 — a third pass.** All 671 positions built again from every map G2's
+    whole game holds — the 1,099 F2 maps it plays, then its own 931 (`harness/floor_g3.py` `g3_library`, 23/23
+    mutants), written by `scripts/c4_library_file.py` to `library_from`; no measured code changed. h324 (all
+    complete), h325 (nine tenths of G2's 293,843, recomputed from G2's and F2's evidence). 4 workers, the only run.
+    Passes continue while one gains a tenth.
   - **N1 result (h317 supported — pre-registered): a learned default keeps the win where the orders miss.** A
     19,996-bit net (`harness/learned_default.py`: cells as the mover sees them + each move's safe / wins-in-two /
     loses-in-two facts, 32 hidden, 4-bit weights) trained on 83,022 solved positions from F2's strategies misses the
