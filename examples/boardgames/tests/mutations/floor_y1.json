@@ -1,0 +1,139 @@
+{
+  "file": "harness/floor_y1.py",
+  "tests": ["tests/test_floor_y1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "other g3 bits",
+      "old": "\"g3_bits\": 280_640",
+      "new": "\"g3_bits\": 280_641"
+    },
+    {
+      "name": "language bar lowered",
+      "old": "\"language_support\": (9, 10)",
+      "new": "\"language_support\": (8, 10)"
+    },
+    {
+      "name": "language refute raised",
+      "old": "\"language_refute\": (1, 2)",
+      "new": "\"language_refute\": (2, 3)"
+    },
+    {
+      "name": "price bar raised",
+      "old": "\"price_support\": (1, 3)",
+      "new": "\"price_support\": (1, 2)"
+    },
+    {
+      "name": "price refute lowered",
+      "old": "\"price_refute\": (1, 2)}",
+      "new": "\"price_refute\": (1, 3)}"
+    },
+    {
+      "name": "language read sparse",
+      "old": "    r = e[\"readings\"][\"exact_all\"]",
+      "new": "    r = e[\"readings\"][\"exact_sparse\"]"
+    },
+    {
+      "name": "language without a commit",
+      "old": "    if not e.get(\"weakc4_commit\") or not r[\"leaves\"]:",
+      "new": "    if not r[\"leaves\"]:"
+    },
+    {
+      "name": "language with no leaves",
+      "old": "    if not e.get(\"weakc4_commit\") or not r[\"leaves\"]:",
+      "new": "    if not e.get(\"weakc4_commit\"):"
+    },
+    {
+      "name": "language support strict",
+      "old": "\"supported\" if sd * won >= sn * leaves",
+      "new": "\"supported\" if sd * won > sn * leaves"
+    },
+    {
+      "name": "language refute strict",
+      "old": "\"refuted\" if rd * won <= rn * leaves",
+      "new": "\"refuted\" if rd * won < rn * leaves"
+    },
+    {
+      "name": "a reading losing a leaf priced",
+      "old": "if r[\"leaves\"] and r[\"won\"] == r[\"leaves\"]]",
+      "new": "if r[\"leaves\"]]"
+    },
+    {
+      "name": "price without a commit",
+      "old": "    if not e.get(\"weakc4_commit\") or not whole:",
+      "new": "    if not whole:"
+    },
+    {
+      "name": "dearest reading priced",
+      "old": "    bits, reading = min(whole)",
+      "new": "    bits, reading = max(whole)"
+    },
+    {
+      "name": "price support strict",
+      "old": "\"supported\" if sd * bits <= sn * g3",
+      "new": "\"supported\" if sd * bits < sn * g3"
+    },
+    {
+      "name": "price refute strict",
+      "old": "\"refuted\" if rd * bits >= rn * g3",
+      "new": "\"refuted\" if rd * bits > rn * g3"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-29T22:48:00+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "other g3 bits": [
+        "test_the_price_is_judged_against_g3_s_bits",
+        "test_the_price_is_the_cheapest_reading_that_wins_every_leaf",
+        "test_y1_measures_weakc4_against_g3_s_whole_game"
+      ],
+      "language bar lowered": [
+        "test_the_language_is_the_share_of_leaves_won_under_the_exact_rule_with_all_ten_levels",
+        "test_y1_measures_weakc4_against_g3_s_whole_game"
+      ],
+      "language refute raised": [
+        "test_the_language_is_the_share_of_leaves_won_under_the_exact_rule_with_all_ten_levels",
+        "test_y1_measures_weakc4_against_g3_s_whole_game"
+      ],
+      "price bar raised": [
+        "test_a_price_of_exactly_a_third_is_supported_and_exactly_a_half_refuted",
+        "test_the_price_is_judged_against_g3_s_bits",
+        "test_y1_measures_weakc4_against_g3_s_whole_game"
+      ],
+      "price refute lowered": [
+        "test_a_price_of_exactly_a_third_is_supported_and_exactly_a_half_refuted",
+        "test_the_price_is_judged_against_g3_s_bits",
+        "test_y1_measures_weakc4_against_g3_s_whole_game"
+      ],
+      "language read sparse": [
+        "test_a_run_without_weakc4_s_commit_or_leaves_is_not_judged",
+        "test_the_language_is_the_share_of_leaves_won_under_the_exact_rule_with_all_ten_levels"
+      ],
+      "language without a commit": ["test_a_run_without_weakc4_s_commit_or_leaves_is_not_judged"],
+      "language with no leaves": ["test_a_run_without_weakc4_s_commit_or_leaves_is_not_judged"],
+      "language support strict": [
+        "test_the_language_is_the_share_of_leaves_won_under_the_exact_rule_with_all_ten_levels"
+      ],
+      "language refute strict": [
+        "test_the_language_is_the_share_of_leaves_won_under_the_exact_rule_with_all_ten_levels"
+      ],
+      "a reading losing a leaf priced": [
+        "test_a_price_of_exactly_a_third_is_supported_and_exactly_a_half_refuted",
+        "test_the_price_is_judged_against_g3_s_bits",
+        "test_the_price_is_the_cheapest_reading_that_wins_every_leaf",
+        "test_with_no_reading_winning_every_leaf_the_price_is_not_judged"
+      ],
+      "price without a commit": ["test_a_run_without_weakc4_s_commit_or_leaves_is_not_judged"],
+      "dearest reading priced": ["test_the_price_is_the_cheapest_reading_that_wins_every_leaf"],
+      "price support strict": [
+        "test_a_price_of_exactly_a_third_is_supported_and_exactly_a_half_refuted"
+      ],
+      "price refute strict": [
+        "test_a_price_of_exactly_a_third_is_supported_and_exactly_a_half_refuted",
+        "test_the_price_is_judged_against_g3_s_bits"
+      ]
+    }
+  }
+}

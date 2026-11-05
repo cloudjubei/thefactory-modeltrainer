@@ -1,0 +1,255 @@
+{
+  "file": "harness/floor_e3.py",
+  "tests": ["tests/test_floor_e3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "a tie goes to the other move",
+      "old": "min([picks[i], *(r for r in e[\"roots\"] if r[\"index\"] == i and r[\"complete\"])]",
+      "new": "min([*(r for r in e[\"roots\"] if r[\"index\"] == i and r[\"complete\"]), picks[i]]"
+    },
+    {
+      "name": "an unfinished build chosen",
+      "old": "if r[\"index\"] == i and r[\"complete\"])]",
+      "new": "if r[\"index\"] == i)]"
+    },
+    {
+      "name": "an unfinished build can refute",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "maps g3 played charged",
+      "old": "for i in played(rs) - g3_played)",
+      "new": "for i in played(rs))"
+    },
+    {
+      "name": "library maps free",
+      "old": "return sum(_coded(r) for r in rs) + sum(",
+      "new": "return sum(_coded(r) for r in rs) + 0 * sum("
+    },
+    {
+      "name": "e1's bits unchecked",
+      "old": "    if control != spec[\"e1_bits\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "selection unchecked",
+      "old": "    if e3_selected(scope, e1, spec) != spec[\"root_moves\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "built moves unchecked",
+      "old": "sorted([r[\"index\"], r[\"root_move\"]] for r in e[\"roots\"]) != sorted(spec[\"root_moves\"])",
+      "new": "False"
+    },
+    {
+      "name": "root node unchecked",
+      "old": "\n            or any(_root_move(r) != r[\"root_move\"] for r in e[\"roots\"])",
+      "new": ""
+    },
+    {
+      "name": "built order matters",
+      "old": "sorted([r[\"index\"], r[\"root_move\"]] for r in e[\"roots\"]) != sorted(spec[\"root_moves\"])",
+      "new": "[[r[\"index\"], r[\"root_move\"]] for r in e[\"roots\"]] != spec[\"root_moves\"]"
+    },
+    {
+      "name": "e1's integrity unchecked",
+      "old": "_integrity(e, spec) or _integrity(e1, E1) or",
+      "new": "_integrity(e, spec) or"
+    },
+    {
+      "name": "the arm's integrity unchecked",
+      "old": "if _integrity(e, spec) or _integrity(e1, E1)",
+      "new": "if _integrity(e1, E1)"
+    },
+    {
+      "name": "an unfinished e1 accepted",
+      "old": " or not all(r[\"complete\"] for r in e1[\"roots\"]):",
+      "new": ":"
+    },
+    {
+      "name": "e1's library unchecked",
+      "old": "for r in e[\"roots\"] + e1[\"roots\"]:",
+      "new": "for r in e[\"roots\"]:"
+    },
+    {
+      "name": "e1's move kept",
+      "old": "for a in winning[i] if a != played[i]]",
+      "new": "for a in winning[i]]"
+    },
+    {
+      "name": "positions unchecked",
+      "old": "if scope[\"positions_fp\"] != spec[\"positions_fp\"] or scope",
+      "new": "if scope"
+    },
+    {
+      "name": "library source unchecked",
+      "old": " or scope[\"library_from\"] != spec[\"library_from\"]:\n        return None",
+      "new": ":\n        return None"
+    },
+    {
+      "name": "control over all of e1",
+      "old": "picks = {r[\"index\"]: r for r in e1[\"roots\"] if r[\"index\"] in spec[\"indices\"]}",
+      "new": "picks = {r[\"index\"]: r for r in e1[\"roots\"]}"
+    },
+    {
+      "name": "best by strategy alone",
+      "old": "key=lambda r: cost([r]))",
+      "new": "key=lambda r: _coded(r))"
+    },
+    {
+      "name": "library maps by another level width",
+      "old": "spec[\"builder\"][\"level_bits\"]) for i",
+      "new": "4) for i"
+    },
+    {
+      "name": "other moves",
+      "old": "[145, 4], [146, 4], [146, 5]]",
+      "new": "[145, 4], [146, 4]]"
+    },
+    {
+      "name": "another position",
+      "old": "\"indices\": [18, 69, 79, 115, 130, 145, 146]",
+      "new": "\"indices\": [18, 39, 69, 79, 115, 130, 145, 146]"
+    },
+    {
+      "name": "fewer roots",
+      "old": "\"roots\": 13,",
+      "new": "\"roots\": 12,"
+    },
+    {
+      "name": "completion bar lowered",
+      "old": "\"complete_support\": 12,",
+      "new": "\"complete_support\": 11,"
+    },
+    {
+      "name": "refutation bar raised",
+      "old": "\"complete_refute\": 10,",
+      "new": "\"complete_refute\": 11,"
+    },
+    {
+      "name": "support bar raised",
+      "old": "\"support\": (9, 10)",
+      "new": "\"support\": (19, 20)"
+    },
+    {
+      "name": "refute bar lowered",
+      "old": "\"refute\": (97, 100)",
+      "new": "\"refute\": (95, 100)"
+    },
+    {
+      "name": "e1's bits",
+      "old": "\"e1_bits\": 28_712",
+      "new": "\"e1_bits\": 28_713"
+    },
+    {
+      "name": "old measurement",
+      "old": "\"measurement_fp\": \"3981ea9f5020\"",
+      "new": "\"measurement_fp\": \"77fc4515e75e\""
+    },
+    {
+      "name": "another scope",
+      "old": "\"scope\": \"c49_o1_scope.json.gz\"",
+      "new": "\"scope\": \"c49_o2_scope.json.gz\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-01T08:56:33+00:00",
+    "killed": 32,
+    "survived": [],
+    "killed_by": {
+      "a tie goes to the other move": [
+        "test_the_cheapest_complete_build_at_each_position_is_judged_and_a_tie_keeps_e1_s"
+      ],
+      "an unfinished build chosen": [
+        "test_an_unfinished_build_is_never_chosen_and_keeps_the_verdict_from_refuting"
+      ],
+      "an unfinished build can refute": [
+        "test_an_unfinished_build_is_never_chosen_and_keeps_the_verdict_from_refuting"
+      ],
+      "support bar exclusive": [
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "refute bar exclusive": [
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "maps g3 played charged": [
+        "test_an_unfinished_build_is_never_chosen_and_keeps_the_verdict_from_refuting",
+        "test_builds_judged_in_any_order",
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them",
+        "test_the_cheapest_complete_build_at_each_position_is_judged_and_a_tie_keeps_e1_s",
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "library maps free": [
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them"
+      ],
+      "e1's bits unchecked": [
+        "test_builds_off_the_registration_are_not_judged",
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them"
+      ],
+      "selection unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "built moves unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "root node unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "built order matters": ["test_builds_judged_in_any_order"],
+      "e1's integrity unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "the arm's integrity unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "an unfinished e1 accepted": ["test_builds_off_the_registration_are_not_judged"],
+      "e1's library unchecked": ["test_builds_off_the_registration_are_not_judged"],
+      "e1's move kept": [
+        "test_an_unfinished_build_is_never_chosen_and_keeps_the_verdict_from_refuting",
+        "test_builds_judged_in_any_order",
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them",
+        "test_the_cheapest_complete_build_at_each_position_is_judged_and_a_tie_keeps_e1_s",
+        "test_the_moves_are_each_winning_move_but_the_one_e1_s_root_played",
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "positions unchecked": [
+        "test_builds_off_the_registration_are_not_judged",
+        "test_the_moves_are_each_winning_move_but_the_one_e1_s_root_played"
+      ],
+      "library source unchecked": [
+        "test_the_moves_are_each_winning_move_but_the_one_e1_s_root_played"
+      ],
+      "control over all of e1": [
+        "test_an_unfinished_build_is_never_chosen_and_keeps_the_verdict_from_refuting",
+        "test_builds_judged_in_any_order",
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them",
+        "test_the_cheapest_complete_build_at_each_position_is_judged_and_a_tie_keeps_e1_s",
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "best by strategy alone": [
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them"
+      ],
+      "library maps by another level width": [
+        "test_library_maps_g3_never_played_are_charged_once_to_the_builds_that_play_them"
+      ],
+      "other moves": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "another position": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "fewer roots": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "completion bar lowered": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "refutation bar raised": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "support bar raised": [
+        "test_e3_builds_every_other_winning_move_at_e1_s_positions",
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "refute bar lowered": [
+        "test_e3_builds_every_other_winning_move_at_e1_s_positions",
+        "test_the_verdict_is_judged_against_e1_s_bits_for_the_same_positions"
+      ],
+      "e1's bits": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "old measurement": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"],
+      "another scope": ["test_e3_builds_every_other_winning_move_at_e1_s_positions"]
+    }
+  }
+}

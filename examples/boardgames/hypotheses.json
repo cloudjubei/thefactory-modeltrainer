@@ -9580,10 +9580,17 @@
       "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_every_frontier_position_completes_from_g2_s_maps",
       "note": "User's choice 2026-10-26 after G2 (h321, 0.74 of F2): a third pass, keep passing while a pass gains a tenth. Library 2,030 maps (harness.floor_g3.g3_library), written by scripts/c4_library_file.py; reuse_window 100,000; fingerprint 98b7fb6ebf7f as F2, G2 \u2014 no measured code changed.",
       "registered_at": "2026-10-26T07:37:56.485633+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_every_frontier_position_completes_from_g2_s_maps",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.93s",
+          "drawn_at": "2026-10-29T07:15:16.805324+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_g3.json.gz",
-        "started": null
+        "started": "2026-10-26T07:38:16+00:00"
       },
       "pins": {
         "tests/test_c49_g3_evidence.py": "12a7db68aad6bd53d4d31c9b3eace08e7ea21b100797140b50a91613289f3ad2",
@@ -9606,10 +9613,18 @@
       "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_a_third_pass_makes_the_whole_game_a_tenth_smaller_again",
       "note": "User's choice 2026-10-26 after G2 (h321, 0.74 of F2). Control recomputed from G2's and F2's evidence (harness.floor_g2.g2_size) and must come to 293,843. Inconclusive or refuted = the second pass took the library's gain.",
       "registered_at": "2026-10-26T07:37:57.126341+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g3_evidence.py::test_c49_g3_a_third_pass_makes_the_whole_game_a_tenth_smaller_again",
+          "ok": false,
+          "detail": "        - supported\nE         + inconclusive\n\ntests/test_c49_g3_evidence.py:42: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_g3_evidence.py::test_c49_g3_a_third_pass_makes_the_whole_game_a_tenth_smaller_again\n1 failed in 13.42s",
+          "drawn_at": "2026-10-29T07:15:35.399626+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_g3.json.gz",
-        "started": null
+        "started": "2026-10-26T07:38:16+00:00"
       },
       "pins": {
         "tests/test_c49_g3_evidence.py": "12a7db68aad6bd53d4d31c9b3eace08e7ea21b100797140b50a91613289f3ad2",
@@ -9624,6 +9639,1256 @@
         "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
       },
       "inconclusive_proof": "tests/test_c49_g3_evidence.py::test_c49_g3_the_size_is_undecidable"
+    },
+    "h326": {
+      "id": "h326",
+      "claim": "\u00a73.6 G3 (registered after the data): the third pass still shrinks almost every position \u2014 smaller on 562 of the 671, larger on 103, equal on 6 (sign test p < 1e-70) \u2014 but by 0.955 of G2's whole game, not a tenth: references by first_use the strategies take 176,750 bits against G2's 202,670, while the 1,207 library maps they play cost 102,815 against G2's 90,098. Of 2,689 library plays, 1,029 are F2's maps G2 kept and 1,660 G2's own. Leaves 6,841 -> 6,330, own maps 931 -> 709; 151 CPU-hours",
+      "mode": "test",
+      "proof": "tests/test_c49_g3_after_evidence.py::test_c49_g3_the_third_pass_trades_strategy_bits_for_library_bits",
+      "note": "h324 supported (671/671), h325 inconclusive (280,640 against 293,843 = 0.955) \u2014 pre-registered. The stopping rule (pass while a pass gains a tenth) ends the passes: the second pass took most of the gain (0.74), the third 0.955. G3's 280,640 is the smallest certified whole game so far.",
+      "registered_at": "2026-10-29T07:16:30.648481+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g3_after_evidence.py::test_c49_g3_the_third_pass_trades_strategy_bits_for_library_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 17.73s",
+          "drawn_at": "2026-10-29T07:17:13.242007+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_g3.json.gz",
+          "started": "2026-10-26T07:38:16+00:00"
+        },
+        {
+          "path": "evidence/c49_g2.json.gz",
+          "started": "2026-10-22T19:17:09+00:00"
+        },
+        {
+          "path": "evidence/c49_f2.json.gz",
+          "started": "2026-10-17T07:16:53+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_g3_after_evidence.py": "598374ec42a9c5fb99d89943f669c549fdd640bd4153174529cc772eeb605987",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_g2.py": "a2822a2e5042d6228f61c945211b444ba88ffda542a8faabffd229778813d4ed",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h327": {
+      "id": "h327",
+      "claim": "\u00a73.6 N2: with L5's rule and pipeline breaking a deciding level's ties by N1's net (the safe move it scores highest, exactly in integers), at least 28 of L4's 32 positions \u2014 held out of the net's training \u2014 get a complete certified strategy within 2 hours. Refuted at 24 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_n2_evidence.py::test_c49_n2_28_of_32_complete_within_2_hours_breaking_ties_by_the_net",
+      "note": "User's choice 2026-10-29 (lever 1 of 2 before options 4/8). Measured code changed: Facts order 'net' (harness.steady_state), harness/integer_net.py, the C walk's pick (order codes, net scores in __int128), native_leaf; C == Python on every rule incl. two nets (tests/test_native_leaf.py). Fingerprint af5ea127269c. Smoke: #470 78 bits in 135 s (L6 263 in 1,369 s).",
+      "registered_at": "2026-10-29T07:48:28.197915+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_n2_evidence.py::test_c49_n2_28_of_32_complete_within_2_hours_breaking_ties_by_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-10-29T19:53:37.338044+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_n2.json.gz",
+        "started": "2026-10-29T07:48:36+00:00"
+      },
+      "pins": {
+        "tests/test_c49_n2_evidence.py": "7b61f16ffa35c6cc884fd2ade774db2f58011c880a94d4b90ec4a328c0c149d4",
+        "harness/floor_n2.py": "88cebd0622af35f44434146c35520371df5556c5c28fd979f316f2d97a65bf29",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/integer_net.py": "0b09c8badcea4b212deabc363a0daee9267fb4b8c0aa046ec1649ed39342581a"
+      },
+      "inconclusive_proof": "tests/test_c49_n2_evidence.py::test_c49_n2_completion_is_undecidable"
+    },
+    "h328": {
+      "id": "h328",
+      "claim": "\u00a73.6 N2: breaking a deciding level's ties by N1's net, L4's 32 positions' certified strategies take no more than nine tenths of L6's 102,289 bits (ties by tactics, the best order adding no bits) \u2014 the net's own 19,996 bits, paid once for a whole game, not counted. Refuted at L6's bits or more",
+      "mode": "test",
+      "proof": "tests/test_c49_n2_evidence.py::test_c49_n2_breaking_ties_by_the_net_makes_the_strategies_a_tenth_smaller_than_tactics",
+      "note": "User's choice 2026-10-29. D1 (h297) warned that fewer misses need not mean smaller strategies; L6's tie-break got 0.94 of L5 here (h300). Supported here would warrant a whole-game build with the net's bits counted.",
+      "registered_at": "2026-10-29T07:48:29.078434+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_n2_evidence.py::test_c49_n2_breaking_ties_by_the_net_makes_the_strategies_a_tenth_smaller_than_tactics",
+          "ok": false,
+          "detail": "ported\nE         + refuted\n\ntests/test_c49_n2_evidence.py:41: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_n2_evidence.py::test_c49_n2_breaking_ties_by_the_net_makes_the_strategies_a_tenth_smaller_than_tactics\n1 failed in 0.12s",
+          "drawn_at": "2026-10-29T19:53:37.717104+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_n2.json.gz",
+        "started": "2026-10-29T07:48:36+00:00"
+      },
+      "pins": {
+        "tests/test_c49_n2_evidence.py": "7b61f16ffa35c6cc884fd2ade774db2f58011c880a94d4b90ec4a328c0c149d4",
+        "harness/floor_n2.py": "88cebd0622af35f44434146c35520371df5556c5c28fd979f316f2d97a65bf29",
+        "harness/floor_l6.py": "116ab146598c8003eea6bccc68ab9773418e11f802f31c5ba777dc0355f5a187",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/integer_net.py": "0b09c8badcea4b212deabc363a0daee9267fb4b8c0aa046ec1649ed39342581a"
+      },
+      "inconclusive_proof": "tests/test_c49_n2_evidence.py::test_c49_n2_the_size_is_undecidable"
+    },
+    "h329": {
+      "id": "h329",
+      "claim": "\u00a73.6 N2 (registered after the data): breaking ties by N1's net does not shrink the strategies. Four positions (#113, #207, #218, #240) were built while the machine was swapping and ran 22,716-22,721 s against the 2-hour cap; on the other 28, all complete, the net's strategies take 68,693 bits against tactics' (L6) 55,809 and L5's 64,648 \u2014 smaller than L6 on 11, larger on 15, equal on 2 (sign test p = 0.56). Were the four as small as L6's, N2 would still take 115,173 bits against L6's 102,289, so h328 is refuted whatever the overload cost; 45.3 hours of builds",
+      "mode": "test",
+      "proof": "tests/test_c49_n2_after_evidence.py::test_c49_n2_the_net_breaks_ties_no_better_than_tactics",
+      "note": "h327 supported (31/32 complete), h328 refuted (206,744 bits, a lower bound with #218 unfinished, against L6's 102,289) \u2014 pre-registered. N1's net, learned from solver labels, is no better a tie-break than the two-ply tactics; the tie-break lever is closed at tactics (F3 settled it for the whole game). Next: lever 2, the builder's own accounting by first_use.",
+      "registered_at": "2026-10-29T19:54:32.504862+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_n2_after_evidence.py::test_c49_n2_the_net_breaks_ties_no_better_than_tactics",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.12s",
+          "drawn_at": "2026-10-29T19:54:32.963238+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_n2.json.gz",
+          "started": "2026-10-29T07:48:36+00:00"
+        },
+        {
+          "path": "evidence/c49_l6.json.gz",
+          "started": "2026-10-21T00:52:59+00:00"
+        },
+        {
+          "path": "evidence/c49_l5.json.gz",
+          "started": "2026-10-16T20:54:12+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_n2_after_evidence.py": "69e1697bec87a0d2532b26033dd52ed13126de8270c175f5641bd8945ea3aa31",
+        "harness/evidence.py": "aba5fc0f3908acd441261267f3e34fdf8d7150322f2420c893b0c27547e20e11"
+      }
+    },
+    "h330": {
+      "id": "h330",
+      "claim": "\u00a73.6 R2: with G1's rule, pipeline and library (B1's 16 heaviest positions from the 766 maps B1's control found, all within reach) and the builder counting its references by first_use, as the judges code them, instead of the index's full width, at least 14 of the 16 positions get a complete certified strategy within 2 hours. Refuted at 12 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_r2_evidence.py::test_c49_r2_14_of_16_complete_counting_references_by_first_use",
+      "note": "",
+      "registered_at": "2026-10-29T20:50:02.805016+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_r2_evidence.py::test_c49_r2_14_of_16_complete_counting_references_by_first_use",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-30T02:55:34.851447+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_r2.json.gz",
+          "started": "2026-10-29T22:39:38+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_r2_evidence.py": "0c9cb137348e2db079678adf15bc4f5b30ce31f70d77c56300ff2f095a1f6742",
+        "harness/floor_r2.py": "6855dc2a31251ccda78d815a8695980de26800c9c52e4a745fb604947159eed5",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e",
+        "harness/strategy_builder.py": "58e64c4b3c95571783334d051ed1763822dd4e3886de442a578f8d20c5d519db"
+      },
+      "inconclusive_proof": "tests/test_c49_r2_evidence.py::test_c49_r2_completion_is_undecidable"
+    },
+    "h331": {
+      "id": "h331",
+      "claim": "\u00a73.6 R2: with the builder counting its references by first_use, as judged, G1's 16 positions take no more than nine tenths of G1's 74,556 bits \u2014 both coded by first_use with every library map a leaf plays paid once (harness.floor_r2, which takes off what the builder charged instead of recoding a fixed-width count). Refuted at G1's bits or more",
+      "mode": "test",
+      "proof": "tests/test_c49_r2_evidence.py::test_c49_r2_counting_references_as_judged_makes_the_heavy_tail_a_tenth_smaller",
+      "note": "",
+      "registered_at": "2026-10-29T20:50:03.162665+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_r2_evidence.py::test_c49_r2_counting_references_as_judged_makes_the_heavy_tail_a_tenth_smaller",
+          "ok": false,
+          "detail": "   - supported\nE         + refuted\n\ntests/test_c49_r2_evidence.py:42: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_r2_evidence.py::test_c49_r2_counting_references_as_judged_makes_the_heavy_tail_a_tenth_smaller\n1 failed in 0.31s",
+          "drawn_at": "2026-10-30T02:55:35.521431+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_r2.json.gz",
+          "started": "2026-10-29T22:39:38+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_r2_evidence.py": "0c9cb137348e2db079678adf15bc4f5b30ce31f70d77c56300ff2f095a1f6742",
+        "harness/floor_r2.py": "6855dc2a31251ccda78d815a8695980de26800c9c52e4a745fb604947159eed5",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e",
+        "harness/strategy_builder.py": "58e64c4b3c95571783334d051ed1763822dd4e3886de442a578f8d20c5d519db"
+      },
+      "inconclusive_proof": "tests/test_c49_r2_evidence.py::test_c49_r2_the_size_is_undecidable"
+    },
+    "h332": {
+      "id": "h332",
+      "claim": "\u00a73.6 Y1: our rule language holds WeakC4's \u2014 at nine tenths or more of WeakC4's leaves (2swap's current release, walked from the empty board), its diagram translated cell for cell wins at its position under our 'exact' rule read with all ten of its levels (its own reading but for our safe-move filter). Refuted at half or less",
+      "mode": "test",
+      "proof": "tests/test_c49_y1_evidence.py::test_c49_y1_our_exact_rule_plays_weakc4_s_diagrams",
+      "note": "",
+      "registered_at": "2026-10-29T22:48:14.947824+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_y1_evidence.py::test_c49_y1_our_exact_rule_plays_weakc4_s_diagrams",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-29T22:49:43.929161+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_weakc4.json.gz",
+        "started": "2026-10-29T22:48:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_y1_evidence.py": "7dc9afe452639a8732006a8ad9b8179ce23f4a83835bc208a37e69e54f27c056",
+        "harness/floor_y1.py": "0ac4a118cd6a0e6437d7fd1a292aff7304ef4c9b48d1193133dfddb0fc7a369c",
+        "scripts/c4_weakc4_yardstick.py": "4cad44f0a79d78b35d2dc945ff18aacb571aaf6b2dd30dfc7e1569098cc27a0c"
+      },
+      "inconclusive_proof": "tests/test_c49_y1_evidence.py::test_c49_y1_the_language_is_undecidable"
+    },
+    "h333": {
+      "id": "h333",
+      "claim": "\u00a73.6 Y1: the gap to WeakC4 is its tree and search, not our code \u2014 WeakC4's whole solution priced in our code (a bit per node, three per table move, references by first_use, every map by map_bits, a mirrored use a second map), in the cheapest reading that wins at every leaf, takes no more than a third of G3's 280,640 bits. Refuted at half or more; not judged if no reading wins every leaf",
+      "mode": "test",
+      "proof": "tests/test_c49_y1_evidence.py::test_c49_y1_weakc4_in_our_code_is_a_third_of_g3_or_less",
+      "note": "",
+      "registered_at": "2026-10-29T22:48:15.076863+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_y1_evidence.py::test_c49_y1_weakc4_in_our_code_is_a_third_of_g3_or_less",
+          "ok": false,
+          "detail": "ted'\nE         \nE         - supported\nE         + not_run\n\ntests/test_c49_y1_evidence.py:36: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_y1_evidence.py::test_c49_y1_weakc4_in_our_code_is_a_third_of_g3_or_less\n1 failed in 0.18s",
+          "drawn_at": "2026-10-29T22:49:44.370848+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_weakc4.json.gz",
+        "started": "2026-10-29T22:48:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_y1_evidence.py": "7dc9afe452639a8732006a8ad9b8179ce23f4a83835bc208a37e69e54f27c056",
+        "harness/floor_y1.py": "0ac4a118cd6a0e6437d7fd1a292aff7304ef4c9b48d1193133dfddb0fc7a369c",
+        "scripts/c4_weakc4_yardstick.py": "4cad44f0a79d78b35d2dc945ff18aacb571aaf6b2dd30dfc7e1569098cc27a0c"
+      },
+      "inconclusive_proof": "tests/test_c49_y1_evidence.py::test_c49_y1_the_price_is_undecidable"
+    },
+    "h334": {
+      "id": "h334",
+      "claim": "\u00a73.6 Y1 (registered after the data): WeakC4's edge is its tree, not its language. Walked from the empty board (commit 51dc838) its strategy has 1,431 first-player positions \u2014 251 table moves, 1,009 leaves on a diagram from ply 4 (18 at ply 4, 65 at ply 6) and 171 won at once \u2014 with 745 maps in our cell-indexed language, 377 of them mirrored uses of its 384 diagrams; our exact rule reads 1,003 of the 1,009 as they are. In our code it takes 123,881 bits, 0.44 of G3's 280,640: nodes, moves and references only 6,401 and maps 117,480 (95%; ten levels on every empty cell). G3 needs 1,207 table moves, 6,330 leaves and 3,359 exceptions: fewer, larger leaves reached earlier is the measured half of the gap, the code (mirror sharing, entropy-coded diagrams) the other",
+      "mode": "test",
+      "proof": "tests/test_c49_y1_after_evidence.py::test_c49_y1_weakc4_s_edge_is_a_small_tree_of_large_leaves",
+      "note": "h332 supported (1,003 of 1,009), h333 not judged (6 leaves undefined under our safe-move filter; 123,881 bits = 0.44 of G3, between its bars) \u2014 pre-registered.",
+      "registered_at": "2026-10-29T22:50:30.951768+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_y1_after_evidence.py::test_c49_y1_weakc4_s_edge_is_a_small_tree_of_large_leaves",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.12s",
+          "drawn_at": "2026-10-29T22:50:31.480111+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_weakc4.json.gz",
+        "started": "2026-10-29T22:48:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_y1_after_evidence.py": "ee14e15b387cecc5e3507b49ab7dd789332d3115d0f38021ed1091152afe9508",
+        "harness/floor_y1.py": "0ac4a118cd6a0e6437d7fd1a292aff7304ef4c9b48d1193133dfddb0fc7a369c",
+        "scripts/c4_weakc4_yardstick.py": "4cad44f0a79d78b35d2dc945ff18aacb571aaf6b2dd30dfc7e1569098cc27a0c"
+      }
+    },
+    "h335": {
+      "id": "h335",
+      "claim": "\u00a73.6 X1: maps shared by mirror image \u2014 every map G3's certified whole game stores (the library maps its leaves play, then each position's own) gets a flag bit, and one that is the mirror image of an earlier map (under the symmetry found from sampled play) is stored as that map's index instead of its levels: this saves at least a twentieth of G3's 280,640 bits. Refuted at a hundredth or less",
+      "mode": "test",
+      "proof": "tests/test_c49_x1_evidence.py::test_c49_x1_maps_stored_once_per_mirror_pair_save_a_twentieth",
+      "note": "",
+      "registered_at": "2026-10-29T23:04:34.106226+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x1_evidence.py::test_c49_x1_maps_stored_once_per_mirror_pair_save_a_twentieth",
+          "ok": false,
+          "detail": "         \nE         - supported\nE         + refuted\n\ntests/test_c49_x1_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_x1_evidence.py::test_c49_x1_maps_stored_once_per_mirror_pair_save_a_twentieth\n1 failed in 0.15s",
+          "drawn_at": "2026-10-29T23:06:19.947238+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x1.json.gz",
+        "started": "2026-10-29T23:04:40+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x1_evidence.py": "d4c1101a593a33dc546266c6267309295d5556cc576e5d14fbe6ef0c2122570e",
+        "harness/floor_x1.py": "0aee4d25db953d376bb7c68a474b3a05f07bc9bee82d57c02f75529127709de3",
+        "scripts/c4_mirror_sharing.py": "4fc2f3d350a8f5008373df8ee2a5da3140aa1075f843a24f0652f11bd9b589a8"
+      },
+      "inconclusive_proof": "tests/test_c49_x1_evidence.py::test_c49_x1_the_map_saving_is_undecidable"
+    },
+    "h336": {
+      "id": "h336",
+      "claim": "\u00a73.6 X1: frontier positions played as their mirror image's strategy \u2014 every frontier position of G3 gets a flag bit, and one whose mirror image is also a frontier position plays that position's strategy mirrored at the partner's index, the cheaper of each pair kept and library maps only the dropped strategies played no longer paid: this saves at least a tenth of G3's 280,640 bits. Refuted at a fiftieth or less",
+      "mode": "test",
+      "proof": "tests/test_c49_x1_evidence.py::test_c49_x1_frontier_positions_played_mirrored_save_a_tenth",
+      "note": "",
+      "registered_at": "2026-10-29T23:04:35.140026+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x1_evidence.py::test_c49_x1_frontier_positions_played_mirrored_save_a_tenth",
+          "ok": false,
+          "detail": "      \nE         - supported\nE         + inconclusive\n\ntests/test_c49_x1_evidence.py:36: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_x1_evidence.py::test_c49_x1_frontier_positions_played_mirrored_save_a_tenth\n1 failed in 0.16s",
+          "drawn_at": "2026-10-29T23:06:21.028027+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x1.json.gz",
+        "started": "2026-10-29T23:04:40+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x1_evidence.py": "d4c1101a593a33dc546266c6267309295d5556cc576e5d14fbe6ef0c2122570e",
+        "harness/floor_x1.py": "0aee4d25db953d376bb7c68a474b3a05f07bc9bee82d57c02f75529127709de3",
+        "scripts/c4_mirror_sharing.py": "4fc2f3d350a8f5008373df8ee2a5da3140aa1075f843a24f0652f11bd9b589a8"
+      },
+      "inconclusive_proof": "tests/test_c49_x1_evidence.py::test_c49_x1_the_root_saving_is_undecidable"
+    },
+    "h337": {
+      "id": "h337",
+      "claim": "\u00a73.6 E1: G3's 8 heaviest ply-6 subtrees (the opening's ply-6 positions, sorted, indices 18 39 69 79 115 130 145 146), each built from ply 6 with G3's rule, pipeline and library, leaves allowed at ply 6 and the move there the builder's, 20-minute searches at plies 6 and 8 \u2014 at least 7 of the 8 get a complete certified strategy within 6 hours. Refuted at 5 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_7_of_8_ply_6_subtrees_complete_within_6_hours",
+      "note": "",
+      "registered_at": "2026-10-29T23:13:28.765421+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_e1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_e1_evidence.py": "fe71954a4df393007f2db58c5356379918cd8e652fdec7a979c1b892e0988a60",
+        "harness/floor_e1.py": "b8a89002538e191181402c7e04daf328354f720f8b99bb9fe771861880373ce4",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e1_evidence.py::test_c49_e1_completion_is_undecidable",
+      "supersession": {
+        "by": "h339",
+        "reason": "the first launch stopped at startup on a spec with no seed, before any data; the same claim was registered again as h339 against the fixed spec and judged there",
+        "at": "2026-10-30T09:20:08.603603+00:00"
+      }
+    },
+    "h338": {
+      "id": "h338",
+      "claim": "\u00a73.6 E1: built from ply 6 with leaves allowed there, G3's 8 heaviest ply-6 subtrees take no more than four fifths of G3's 47,038 bits for the same subtrees (the opening's move there, the positions below it the empty map wins, and G3's strategies, references by first_use) \u2014 the arm's strategies by first_use plus every library map they play that G3's whole game does not. Refuted at G3's bits or more",
+      "mode": "test",
+      "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_leaves_from_ply_6_make_g3_s_heaviest_subtrees_a_fifth_smaller",
+      "note": "",
+      "registered_at": "2026-10-29T23:13:29.081492+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_e1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_e1_evidence.py": "fe71954a4df393007f2db58c5356379918cd8e652fdec7a979c1b892e0988a60",
+        "harness/floor_e1.py": "b8a89002538e191181402c7e04daf328354f720f8b99bb9fe771861880373ce4",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e1_evidence.py::test_c49_e1_the_size_is_undecidable",
+      "supersession": {
+        "by": "h340",
+        "reason": "the first launch stopped at startup on a spec with no seed, before any data; the same claim was registered again as h340 against the fixed spec and judged there",
+        "at": "2026-10-30T09:20:13.700203+00:00"
+      }
+    },
+    "h339": {
+      "id": "h339",
+      "claim": "\u00a73.6 E1: G3's 8 heaviest ply-6 subtrees (the opening's ply-6 positions, sorted, indices 18 39 69 79 115 130 145 146), each built from ply 6 with G3's rule, pipeline and library, leaves allowed at ply 6 and the move there the builder's, 20-minute searches at plies 6 and 8 \u2014 at least 7 of the 8 get a complete certified strategy within 6 hours. Refuted at 5 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_7_of_8_ply_6_subtrees_complete_within_6_hours",
+      "note": "Re-registers h337 unchanged: the first launch stopped at startup, before any root was built and before evidence/c49_e1.json.gz existed, because harness/floor_e1.SPEC had no 'seed' (scripts/c4_strategy_s2.py draws its default order from it before the SPEC's indices replace that order). SPEC now carries G3's seed, which does not change the roots built; the pin moved, so h337 can no longer be verified.",
+      "registered_at": "2026-10-30T02:45:17.509290+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_7_of_8_ply_6_subtrees_complete_within_6_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.17s",
+          "drawn_at": "2026-10-30T09:19:43.513247+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e1.json.gz",
+        "started": "2026-10-30T02:45:50+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e1_evidence.py": "fe71954a4df393007f2db58c5356379918cd8e652fdec7a979c1b892e0988a60",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e1_evidence.py::test_c49_e1_completion_is_undecidable"
+    },
+    "h340": {
+      "id": "h340",
+      "claim": "\u00a73.6 E1: built from ply 6 with leaves allowed there, G3's 8 heaviest ply-6 subtrees take no more than four fifths of G3's 47,038 bits for the same subtrees (the opening's move there, the positions below it the empty map wins, and G3's strategies, references by first_use) \u2014 the arm's strategies by first_use plus every library map they play that G3's whole game does not. Refuted at G3's bits or more",
+      "mode": "test",
+      "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_leaves_from_ply_6_make_g3_s_heaviest_subtrees_a_fifth_smaller",
+      "note": "Re-registers h338 unchanged: the first launch stopped at startup, before any root was built and before evidence/c49_e1.json.gz existed, because harness/floor_e1.SPEC had no 'seed' (scripts/c4_strategy_s2.py draws its default order from it before the SPEC's indices replace that order). SPEC now carries G3's seed, which does not change the roots built; the pin moved, so h338 can no longer be verified.",
+      "registered_at": "2026-10-30T02:45:18.087125+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e1_evidence.py::test_c49_e1_leaves_from_ply_6_make_g3_s_heaviest_subtrees_a_fifth_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 17.92s",
+          "drawn_at": "2026-10-30T09:20:03.757260+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e1.json.gz",
+        "started": "2026-10-30T02:45:50+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e1_evidence.py": "fe71954a4df393007f2db58c5356379918cd8e652fdec7a979c1b892e0988a60",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e1_evidence.py::test_c49_e1_the_size_is_undecidable"
+    },
+    "h341": {
+      "id": "h341",
+      "claim": "\u00a73.6 R2 (after the data): the builder counting its references by first_use grows the tree more than it saves \u2014 G1's 16 positions take 2,173 leaves and 449 moves against G1's 1,513 and 283 and 14,639 exception bits against 19,101, 82,251 bits in all against G1's 74,556, larger on 10 positions and smaller on 6 (sign test p = 0.45); cheaper references make splitting pay more often. The caps were load-biased (17.6 h of builds against 14.7 for 1,093 searches against 1,138)",
+      "mode": "test",
+      "proof": "tests/test_c49_r2_after_evidence.py::test_c49_r2_first_use_references_grow_the_tree_more_than_they_save",
+      "note": "",
+      "registered_at": "2026-10-30T02:57:23.836636+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_r2_after_evidence.py::test_c49_r2_first_use_references_grow_the_tree_more_than_they_save",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.34s",
+          "drawn_at": "2026-10-30T02:57:24.513304+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_r2.json.gz",
+        "started": "2026-10-29T22:39:38+00:00"
+      },
+      "pins": {
+        "tests/test_c49_r2_after_evidence.py": "838084f762258905805e96e28081672b0d4150fb97580b78d4288ffd52f5c4a2",
+        "harness/floor_r2.py": "6855dc2a31251ccda78d815a8695980de26800c9c52e4a745fb604947159eed5",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c"
+      }
+    },
+    "h342": {
+      "id": "h342",
+      "claim": "\u00a73.6 E1 (after the data): the saving is the builder's move at ply 6, not an earlier leaf \u2014 no root is a leaf; on #115, #130 and #145 the builder played another winning move than the opening's lowest column and the three subtrees fell from G3's 18,156 bits to 2,840, while the five that kept the opening's move take 30,235 against 28,882",
+      "mode": "test",
+      "proof": "tests/test_c49_e1_after_evidence.py::test_c49_e1_the_saving_is_the_builder_s_move_at_ply_6",
+      "note": "",
+      "registered_at": "2026-10-30T09:20:47.348496+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e1_after_evidence.py::test_c49_e1_the_saving_is_the_builder_s_move_at_ply_6",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 12.04s",
+          "drawn_at": "2026-10-30T09:20:59.777411+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e1.json.gz",
+        "started": "2026-10-30T02:45:50+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e1_after_evidence.py": "6e283dc2610dec048b5aa7917d830bf91c897ba1965f98c567cba4308b0124f4",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9"
+      }
+    },
+    "h343": {
+      "id": "h343",
+      "claim": "\u00a73.6 O1: the 31 ply-6 positions beyond E1's 8 where the builder's move rule, given G3's library, picks another move than the opening (evidence/c49_o1_scope.json.gz: 3 13 14 21 28 37 41 42 43 46 48 52 54 73 77 78 80 81 89 92 97 103 105 113 118 124 125 126 127 135 140), each built from ply 6 exactly as E1 built its 8 \u2014 at least 29 of the 31 get a complete certified strategy within 6 hours. Refuted at 25 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_o1_evidence.py::test_c49_o1_29_of_31_ply_6_subtrees_complete_within_6_hours",
+      "note": "",
+      "registered_at": "2026-10-30T10:39:13.448265+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_o1_evidence.py::test_c49_o1_29_of_31_ply_6_subtrees_complete_within_6_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.86s",
+          "drawn_at": "2026-10-30T23:14:54.211082+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_o1.json.gz",
+        "started": "2026-10-30T10:39:42+00:00"
+      },
+      "pins": {
+        "tests/test_c49_o1_evidence.py": "68b5f1b3341b6df5e2f95f20dee8cd69a400d36b37d6e37a91665fd7703996d4",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_o1_evidence.py::test_c49_o1_completion_is_undecidable"
+    },
+    "h344": {
+      "id": "h344",
+      "claim": "\u00a73.6 O1: built from ply 6 with the builder's move there, the 31 ply-6 positions beyond E1's 8 where that move differs from the opening's take no more than three quarters of G3's 51,312 bits for the same subtrees (the opening's move there, the positions below it the empty map wins, and G3's strategies, references by first_use) \u2014 the arm's strategies by first_use plus every library map they play that G3's whole game does not. Refuted at G3's bits or more",
+      "mode": "test",
+      "proof": "tests/test_c49_o1_evidence.py::test_c49_o1_the_builder_s_move_at_ply_6_makes_its_subtrees_a_quarter_smaller",
+      "note": "",
+      "registered_at": "2026-10-30T10:39:14.074657+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_o1_evidence.py::test_c49_o1_the_builder_s_move_at_ply_6_makes_its_subtrees_a_quarter_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 41.25s",
+          "drawn_at": "2026-10-30T23:15:39.774286+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_o1.json.gz",
+        "started": "2026-10-30T10:39:42+00:00"
+      },
+      "pins": {
+        "tests/test_c49_o1_evidence.py": "68b5f1b3341b6df5e2f95f20dee8cd69a400d36b37d6e37a91665fd7703996d4",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_o1_evidence.py::test_c49_o1_the_size_is_undecidable"
+    },
+    "h345": {
+      "id": "h345",
+      "claim": "\u00a73.6 O1 (after the data): the builder's move at ply 6 shrinks nearly every subtree where it differs from the opening's \u2014 of the 31, 28 are smaller than G3's and 3 larger (#3, #43, #92); 5 became a single leaf at ply 6 (#13, #21, #52, #54, #127) and 24 played the builder's pick from the scope; 20,704 bits against G3's 51,312 (0.40)",
+      "mode": "test",
+      "proof": "tests/test_c49_o1_after_evidence.py::test_c49_o1_the_builder_s_move_at_ply_6_shrinks_nearly_every_subtree",
+      "note": "",
+      "registered_at": "2026-10-30T23:15:45.487095+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_o1_after_evidence.py::test_c49_o1_the_builder_s_move_at_ply_6_shrinks_nearly_every_subtree",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 14.01s",
+          "drawn_at": "2026-10-30T23:16:00.747022+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_o1.json.gz",
+        "started": "2026-10-30T10:39:42+00:00"
+      },
+      "pins": {
+        "tests/test_c49_o1_after_evidence.py": "9d0f9f8e043f12cd0c74be89a85eb68f3656cbfb36042914ad4de6c84a1e844c",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9"
+      }
+    },
+    "h346": {
+      "id": "h346",
+      "claim": "\u00a73.6 E3: at E1's 7 ply-6 positions with more than one winning move, each winning move E1's root did not play (13, from the scope's winning moves), built from ply 6 with that move at the root and otherwise as E1 built its 8 (6-hour cap, G3's library), completes within 6 hours in at least 12 of the 13. Refuted at 10 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_e3_evidence.py::test_c49_e3_12_of_13_other_winning_moves_complete_within_6_hours",
+      "note": "",
+      "registered_at": "2026-11-01T08:59:37.200587+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e3_evidence.py::test_c49_e3_12_of_13_other_winning_moves_complete_within_6_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.21s",
+          "drawn_at": "2026-11-01T15:26:15.441384+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e3.json.gz",
+        "started": "2026-11-01T08:59:47+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e3_evidence.py": "27d0106ff59da800534448df62150fe043e23c128c569d84a52f039424076ae0",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e3_evidence.py::test_c49_e3_completion_is_undecidable"
+    },
+    "h347": {
+      "id": "h347",
+      "claim": "\u00a73.6 E3: trying every winning move at ply 6 beats the builder's free pick \u2014 at E1's 7 positions with more than one winning move, the cheapest complete build of each (E1's pick or one of E3's 13 other winning moves; a tie keeps E1's) takes no more than nine tenths of E1's 28,712 bits for the same 7, each charged its strategy by first_use plus the library maps it plays that G3's whole game does not. Refuted at 97/100 of E1's bits or more once every build finished",
+      "mode": "test",
+      "proof": "tests/test_c49_e3_evidence.py::test_c49_e3_the_cheapest_winning_move_takes_a_tenth_less_than_the_builder_s_pick",
+      "note": "",
+      "registered_at": "2026-11-01T08:59:38.073226+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e3_evidence.py::test_c49_e3_the_cheapest_winning_move_takes_a_tenth_less_than_the_builder_s_pick",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 16.21s",
+          "drawn_at": "2026-11-01T15:26:33.373470+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e3.json.gz",
+        "started": "2026-11-01T08:59:47+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e3_evidence.py": "27d0106ff59da800534448df62150fe043e23c128c569d84a52f039424076ae0",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_e3_evidence.py::test_c49_e3_the_size_is_undecidable"
+    },
+    "h348": {
+      "id": "h348",
+      "claim": "\u00a73.6 E3 (after the data): the builder's free pick at ply 6 is the cheapest winning move only where it differs from the opening's \u2014 #115, #130, #145 \u2014 while at #18, #69, #79 and #146 another move is cheaper (by 1,839-3,696 bits): two picks were ties on covered replies broken by the lowest column, and at two the move covering the most replies lost to one covering fewer. Moves at one position differ up to 13-fold",
+      "mode": "test",
+      "proof": "tests/test_c49_e3_after_evidence.py::test_c49_e3_the_free_pick_is_cheapest_only_where_it_differs_from_the_opening_s",
+      "note": "",
+      "registered_at": "2026-11-01T15:27:20.924085+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_e3_after_evidence.py::test_c49_e3_the_free_pick_is_cheapest_only_where_it_differs_from_the_opening_s",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.32s",
+          "drawn_at": "2026-11-01T15:27:21.758401+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e3.json.gz",
+        "started": "2026-11-01T08:59:47+00:00"
+      },
+      "pins": {
+        "tests/test_c49_e3_after_evidence.py": "458736c2474fbdc950efde556511cd6d77b6937e05bf92d9162078647d60240d",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h349": {
+      "id": "h349",
+      "claim": "\u00a73.6 J1 (after the data): the whole game assembled from G3 and the ply-6 builds of E1, O1 and E3 \u2014 the ply-6 opening, at each of its 148 frontier positions G3's piece or one complete checked build, each ply-8 position and each library map paid once, chosen on the whole game's bits \u2014 takes 203,774 bits against G3's 280,640 (0.73), which the assembly reproduces exactly with no builds: 30 of 39 positions take a build, 503 of 671 strategies and 891 of 1,207 library maps remain",
+      "mode": "test",
+      "proof": "tests/test_c49_j1_evidence.py::test_c49_j1_the_assembled_whole_game_takes_0_73_of_g3_s_bits",
+      "note": "",
+      "registered_at": "2026-11-01T17:48:55.675315+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_j1_evidence.py::test_c49_j1_the_assembled_whole_game_takes_0_73_of_g3_s_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 41.60s",
+          "drawn_at": "2026-11-01T17:49:38.011832+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_e3.json.gz",
+        "started": "2026-11-01T08:59:47+00:00"
+      },
+      "pins": {
+        "tests/test_c49_j1_evidence.py": "9113a6fd63d93cc061e842b301908c4324ee4228637d8e7ce7bb5a41086323a3",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h350": {
+      "id": "h350",
+      "claim": "\u00a73.6 V1: at the 22 ply-6 positions with more than one winning move under which G3 pays at least 1,500 bits (the scope, evidence/c49_o1_scope.json.gz), the 63 winning moves no root of E1, O1 or E3 played, each built from ply 6 with that move at the root and otherwise as E1 built its 8 (6-hour cap, G3's library), complete within 6 hours in at least 58 of the 63. Refuted at 49 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_v1_evidence.py::test_c49_v1_58_of_63_unbuilt_winning_moves_complete_within_6_hours",
+      "note": "",
+      "registered_at": "2026-11-01T19:17:13.175114+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v1_evidence.py::test_c49_v1_58_of_63_unbuilt_winning_moves_complete_within_6_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.75s",
+          "drawn_at": "2026-11-02T14:48:24.958581+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v1.json.gz",
+        "started": "2026-11-01T19:17:26+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_v1_evidence.py::test_c49_v1_completion_is_undecidable"
+    },
+    "h351": {
+      "id": "h351",
+      "claim": "\u00a73.6 V1: building every winning move at the heavy ply-6 positions keeps shrinking the whole game \u2014 with V1's 63 builds added to E1's, O1's and E3's, the whole game J1 assembles (harness.floor_j1: the ply-6 opening, at each frontier position G3's piece or one complete checked build, each library map played paid once; a tie keeps the earlier build, and never worse than the assembly without V1) takes no more than 97/100 of the 203,774 bits it takes without them. Refuted at 99/100 or more once every build finished",
+      "mode": "test",
+      "proof": "tests/test_c49_v1_evidence.py::test_c49_v1_the_whole_game_with_the_batch_takes_97_100_of_j1_s_or_less",
+      "note": "",
+      "registered_at": "2026-11-01T19:17:14.093677+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v1_evidence.py::test_c49_v1_the_whole_game_with_the_batch_takes_97_100_of_j1_s_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 74.79s (0:01:14)",
+          "drawn_at": "2026-11-02T14:49:42.487193+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v1.json.gz",
+        "started": "2026-11-01T19:17:26+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_v1_evidence.py::test_c49_v1_the_size_is_undecidable"
+    },
+    "h352": {
+      "id": "h352",
+      "claim": "\u00a73.6 V1 (after the data): all 63 builds complete (115.5 hours); with them the whole game J1's chooser assembles takes 197,650 bits, 8 of V1's builds taken. At 4 of the 5 V1 positions taking no build (#13, #41, #73, #99) every ply-8 position below is also reached from another ply-6 position keeping G3's piece, so a build there saves at most the 4-bit move (#13's move 3: 66 bits against G3's 1,536, not taken); it pays only if every ply-6 position sharing those ply-8 positions swaps with it, and the chooser tries at most pairs \u2014 197 of 820 ply-8 positions are shared, joining the 148 ply-6 positions into groups of up to 10",
+      "mode": "test",
+      "proof": "tests/test_c49_v1_after_evidence.py::test_c49_v1_builds_whose_ply_8_positions_other_positions_share_are_not_taken",
+      "note": "",
+      "registered_at": "2026-11-02T15:03:40.758931+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v1_after_evidence.py::test_c49_v1_builds_whose_ply_8_positions_other_positions_share_are_not_taken",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 116.17s (0:01:56)",
+          "drawn_at": "2026-11-02T15:05:43.075656+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v1.json.gz",
+        "started": "2026-11-01T19:17:26+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v1_after_evidence.py": "479ced514cc738636e26d9420b4f9596ca0dfefdcd02efbe95a1130544a4d389",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h353": {
+      "id": "h353",
+      "claim": "\u00a73.6 J2 (after the data): assembling the whole game by transposition group (harness.floor_j2: ply-6 positions sharing ply-8 positions choose together, every subset of a group's positions with builds tried at once) adds nothing \u2014 197,650 bits and the same 36 swaps as J1's chooser, from J1's choice or from none. The builds left out wait on group members with no build: all 7 groups holding an untaken build also hold unbuilt positions (22, six with a single winning move: #40, #62, #76, #85, #102, #107), where G3 pays 1,532 (#13 with #76), 1,664 (#41 with #40), 2,090 (#99's group) and 2,448 (#73's group) bits at the shared ply-8 positions; the next batch is chosen by group, single-move positions included",
+      "mode": "test",
+      "proof": "tests/test_c49_j2_evidence.py::test_c49_j2_group_choice_adds_nothing_the_untaken_builds_wait_on_unbuilt_group_members",
+      "note": "",
+      "registered_at": "2026-11-02T15:41:37.462069+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_j2_evidence.py::test_c49_j2_group_choice_adds_nothing_the_untaken_builds_wait_on_unbuilt_group_members",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 131.22s (0:02:11)",
+          "drawn_at": "2026-11-02T15:43:56.655004+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v1.json.gz",
+        "started": "2026-11-01T19:17:26+00:00"
+      },
+      "pins": {
+        "tests/test_c49_j2_evidence.py": "63b260e568af8b2574cd0c44381557b4a8f6c573e0cae8629a1e157545dfa6ec",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      }
+    },
+    "h354": {
+      "id": "h354",
+      "claim": "\u00a73.6 V2: in the 9 transposition groups of ply-6 positions on which the whole game assembled from E1, O1, E3 and V1 (J1's chooser, then by group: 197,650 bits) still pays at least 4,000 bits, the 67 builds no earlier root covers (each winning move at a member with more than one; a free build at a member with one winning move and no build) \u2014 each built from ply 6, otherwise as E1 built its 8 (6-hour cap, G3's library) \u2014 complete within 6 hours in at least 62 of the 67. Refuted at 52 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_v2_evidence.py::test_c49_v2_62_of_67_builds_by_group_complete_within_6_hours",
+      "note": "",
+      "registered_at": "2026-11-02T15:57:00.313818+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v2_evidence.py::test_c49_v2_62_of_67_builds_by_group_complete_within_6_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.50s",
+          "drawn_at": "2026-11-03T09:10:55.873052+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v2.json.gz",
+        "started": "2026-11-02T15:57:08+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v2_evidence.py": "b95a4d560721ca01b39f231b7d3a92556c77775018854ae19f2c8f054d24dc1f",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_v2_evidence.py::test_c49_v2_completion_is_undecidable"
+    },
+    "h355": {
+      "id": "h355",
+      "claim": "\u00a73.6 V2: choosing the next builds by transposition group keeps shrinking the whole game \u2014 with V2's 67 builds added, the whole game assembled the same way (J1's chooser, then J2 by group from its choice; never worse than without V2, a tie keeping the earlier build) takes no more than 97/100 of the 197,650 bits it takes without them. Refuted at 99/100 or more once every build finished",
+      "mode": "test",
+      "proof": "tests/test_c49_v2_evidence.py::test_c49_v2_the_whole_game_with_the_batch_takes_97_100_of_197_650_or_less",
+      "note": "",
+      "registered_at": "2026-11-02T15:57:01.098061+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v2_evidence.py::test_c49_v2_the_whole_game_with_the_batch_takes_97_100_of_197_650_or_less",
+          "ok": false,
+          "detail": "ed\nE         + inconclusive\n\ntests/test_c49_v2_evidence.py:55: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_v2_evidence.py::test_c49_v2_the_whole_game_with_the_batch_takes_97_100_of_197_650_or_less\n1 failed in 139.20s (0:02:19)",
+          "drawn_at": "2026-11-03T09:13:17.698604+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v2.json.gz",
+        "started": "2026-11-02T15:57:08+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v2_evidence.py": "b95a4d560721ca01b39f231b7d3a92556c77775018854ae19f2c8f054d24dc1f",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_v2_evidence.py::test_c49_v2_the_size_is_undecidable"
+    },
+    "h356": {
+      "id": "h356",
+      "claim": "\u00a73.6 V2 (after the data): with V2's 67 builds (all complete; 107.5 hours) the whole game assembled as harness.floor_v2 assembles it takes 192,591 bits \u2014 0.974 of 197,650, 871 bits over h355's 97/100 bar. 16 of V2's builds are taken; the group #91\u2013#114 gives 1,920 of the 5,059 bits saved (4,208 to 2,288). Free builds at the heavy single-move positions save little: #2 4,418 and #68 4,350 against G3's 4,886 and 4,894, and #96's 4,842 against G3's 4,304 is not taken. Every winning move is built in all but one of the 11 groups still paying at least 3,000 bits (56,552 bits, 29% of the game): a batch by group at 3,000 holds only #116's free build, at 2,000 51 builds in 8 groups. Parts: opening 845, library 72,637 (834 maps), 409 G3 strategies 61,427, builds at 51 ply-6 positions 57,682 (V2's 17,282)",
+      "mode": "test",
+      "proof": "tests/test_c49_v2_after_evidence.py::test_c49_v2_saves_2_6_percent_and_the_heaviest_groups_have_every_winning_move_built",
+      "note": "",
+      "registered_at": "2026-11-03T09:39:46.962735+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_v2_after_evidence.py::test_c49_v2_saves_2_6_percent_and_the_heaviest_groups_have_every_winning_move_built",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 225.23s (0:03:45)",
+          "drawn_at": "2026-11-03T09:43:34.737508+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_v2.json.gz",
+        "started": "2026-11-02T15:57:08+00:00"
+      },
+      "pins": {
+        "tests/test_c49_v2_after_evidence.py": "25fe1ac1b9be258b0d3e136c23cdffc90df8229348f6a70c0394b36c7eb9f299",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_v2_evidence.py": "b95a4d560721ca01b39f231b7d3a92556c77775018854ae19f2c8f054d24dc1f"
+      }
+    },
+    "h357": {
+      "id": "h357",
+      "claim": "\u00a73.6 G4: the 409 ply-8 positions the assembled whole game (G3 with the E1, O1, E3, V1 and V2 builds, 192,591 bits) still takes from G3, each rebuilt with G3's builder (2-hour cap) from every map that game holds \u2014 G3's 2,030-map library, then those 409 strategies' own maps, then the own maps of the 51 builds it takes (2,530 maps) \u2014 all complete. Refuted at 401 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_g4_evidence.py::test_c49_g4_all_409_rebuilds_complete",
+      "note": "",
+      "registered_at": "2026-11-03T13:46:44.637348+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g4_evidence.py::test_c49_g4_all_409_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.09s",
+          "drawn_at": "2026-11-03T22:23:35.705801+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_g4.json.gz",
+        "started": "2026-11-03T13:46:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_g4_evidence.py": "ea4c83f232946b9f6655eebf15bb6892cbd74ced64c3301c96c81349e6c5b9e3",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g4_evidence.py::test_c49_g4_completion_is_undecidable"
+    },
+    "h358": {
+      "id": "h358",
+      "claim": "\u00a73.6 G4: a library pass over the assembled whole game keeps shrinking it \u2014 with G4's complete rebuilds in place of G3's strategies (a rebuild that alone grows the game going back to G3's, the ply-6 builds then chosen again as floor_v2 chooses them; never worse than without G4), the whole game takes no more than 97/100 of 192,591 bits. Refuted at 99/100 or more once every rebuild finished",
+      "mode": "test",
+      "proof": "tests/test_c49_g4_evidence.py::test_c49_g4_the_whole_game_with_the_pass_takes_97_100_of_192_591_or_less",
+      "note": "",
+      "registered_at": "2026-11-03T13:46:45.093007+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g4_evidence.py::test_c49_g4_the_whole_game_with_the_pass_takes_97_100_of_192_591_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 260.41s (0:04:20)",
+          "drawn_at": "2026-11-03T22:28:01.548347+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_g4.json.gz",
+        "started": "2026-11-03T13:46:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_g4_evidence.py": "ea4c83f232946b9f6655eebf15bb6892cbd74ced64c3301c96c81349e6c5b9e3",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j2.py": "55878b4f046a1862cca16110f43a7da48be8ba5d26f1be7b427cd313e774346b",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_e1.py": "6826ab1ac0afe8b83b61bdbc80ec3af3643478b68b2c248c166d2d8e02b8f3a8",
+        "harness/floor_e3.py": "3df93d89efa0ea9931c001542e29d8d6b304b37e17f7463f0be5cc7866490498",
+        "harness/floor_o1.py": "11ff6fed1c42a8f8ef5c5987086313aceba9d65e4c58612505d9d6edb4b99927",
+        "harness/floor_v1.py": "c17396a36dd5574afba29f65d80d306b4698c3a235cc5283f81752fd611daf19",
+        "harness/floor_g1.py": "cfdc29c1384a10471f6108a16b7fd7874bda683b4bf1bc3b6e06372177ea852c",
+        "harness/floor_g3.py": "68131e8847dfe4e479b43abff8552fa8570c148db4f1496862d0c6d0ea219435",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/opening.py": "1226310a1b10181ee5835b8ac0104ce6a67221277cb77f2f1bccecd201a873a9",
+        "harness/reference_coding.py": "aa50d798ad82cd67b43abd32a3ebf37f33f80e8c03a435bc2b0afe94e7e29b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_g4_evidence.py::test_c49_g4_the_size_is_undecidable"
+    },
+    "h359": {
+      "id": "h359",
+      "claim": "\u00a73.6 G4 (after the data): all 409 rebuilds complete (55.2 hours against G3's 67.0 for the same positions) and the whole game assembled as harness.floor_g4 assembles it takes 184,556 bits \u2014 0.958 of 192,591. Alone 86 rebuilds are smaller than G3's strategy and 204 play a map beyond G3's library; the 409 take 55,928 bits against G3's 61,427, but all in at once grow the game to 195,394 for the new maps they pay. Sending back the best return one at a time, 333 go back and 76 stay (22,674 bits against G3's 29,270), 184,565; the ply-6 builds chosen again keep the same 51 positions and swap #44's move 1 (344) for its move 3 (433), 184,556. Parts: opening 845, library 71,109 (816 maps, 83 beyond G3's library), 409 strategies 54,831, builds at 51 ply-6 positions 57,771",
+      "mode": "test",
+      "proof": "tests/test_c49_g4_after_evidence.py::test_c49_g4_saves_4_2_percent_from_76_rebuilds_kept_of_409",
+      "note": "",
+      "registered_at": "2026-11-03T22:39:44.731880+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_g4_after_evidence.py::test_c49_g4_saves_4_2_percent_from_76_rebuilds_kept_of_409",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 202.36s (0:03:22)",
+          "drawn_at": "2026-11-03T22:43:18.479736+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_g4.json.gz",
+        "started": "2026-11-03T13:46:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_g4_after_evidence.py": "1c2c4db48619929936c9383ca78404328737a6d49abc8167d694730791a00ab5",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_g4_evidence.py": "ea4c83f232946b9f6655eebf15bb6892cbd74ced64c3301c96c81349e6c5b9e3"
+      }
+    },
+    "h360": {
+      "id": "h360",
+      "claim": "\u00a73.6 U1 (after the data): choosing among G4's 409 rebuilds by local search (harness.floor_u1: one rebuild, or every rebuild playing one map, in or out at a time, the move that shrinks the whole game most first) instead of G4's sending back one at a time from all in. From none kept the search stops at 61 rebuilds and 184,410 bits; from all kept at 66 and 184,328. Choosing the ply-6 builds again would take 184,386, so V2's choice stays, and the whole game takes 184,328 bits \u2014 228 fewer than G4's 184,556 (0.9988). Parts: opening 845, library 70,849 (814 maps, 63 beyond G3's library), 409 strategies 54,952 (the 66 rebuilds 16,901 against G3's 23,376), builds at 51 ply-6 positions 57,682",
+      "mode": "test",
+      "proof": "tests/test_c49_u1_evidence.py::test_c49_u1_local_search_over_g4_s_rebuilds_saves_228_bits",
+      "note": "",
+      "registered_at": "2026-11-04T00:17:20.624278+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_u1_evidence.py::test_c49_u1_local_search_over_g4_s_rebuilds_saves_228_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 4488.13s (1:14:48)",
+          "drawn_at": "2026-11-04T01:33:37.213697+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_g4.json.gz",
+        "started": "2026-11-03T13:46:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_u1_evidence.py": "f036827b3ad17ceb1de3a84b8270379a90041e2688ac678dc53cbe50872d3d9a",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_g4_evidence.py": "ea4c83f232946b9f6655eebf15bb6892cbd74ced64c3301c96c81349e6c5b9e3"
+      }
+    },
+    "h361": {
+      "id": "h361",
+      "claim": "\u00a73.6 Z1: the 51 ply-6 builds the assembled whole game takes (184,328 bits; U1's game), each rebuilt at the same position with the same root move, with the builder they were built with (6-hour cap), from every map that game holds \u2014 G4's 2,530-map library, then the own maps of the 66 rebuilds U1 keeps (2,598 maps) \u2014 48 or more complete. Refuted at 40 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_z1_evidence.py::test_c49_z1_48_of_the_51_rebuilds_complete",
+      "note": "",
+      "registered_at": "2026-11-04T03:09:13.537397+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z1_evidence.py::test_c49_z1_48_of_the_51_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.64s",
+          "drawn_at": "2026-11-04T13:11:04.181968+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_z1.json.gz",
+        "started": "2026-11-04T03:09:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0"
+      },
+      "inconclusive_proof": "tests/test_c49_z1_evidence.py::test_c49_z1_completion_is_undecidable"
+    },
+    "h362": {
+      "id": "h362",
+      "claim": "\u00a73.6 Z1: rebuilding the assembled whole game's ply-6 builds keeps shrinking it \u2014 with Z1's complete rebuilds as candidates for the builds they replace, chosen by U1's search from none taken and from all taken (never worse than without Z1), the whole game takes no more than 97/100 of 184,328 bits. Refuted at 99/100 or more once every rebuild finished",
+      "mode": "test",
+      "proof": "tests/test_c49_z1_evidence.py::test_c49_z1_the_whole_game_with_the_rebuilds_takes_97_100_of_184_328_or_less",
+      "note": "",
+      "registered_at": "2026-11-04T03:09:14.114623+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z1_evidence.py::test_c49_z1_the_whole_game_with_the_rebuilds_takes_97_100_of_184_328_or_less",
+          "ok": false,
+          "detail": "\nE         + inconclusive\n\ntests/test_c49_z1_evidence.py:56: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_z1_evidence.py::test_c49_z1_the_whole_game_with_the_rebuilds_takes_97_100_of_184_328_or_less\n1 failed in 92.01s (0:01:32)",
+          "drawn_at": "2026-11-04T13:12:38.675576+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_z1.json.gz",
+        "started": "2026-11-04T03:09:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0"
+      },
+      "inconclusive_proof": "tests/test_c49_z1_evidence.py::test_c49_z1_the_size_is_undecidable"
+    },
+    "h363": {
+      "id": "h363",
+      "claim": "\u00a73.6 Z1 (after the data): U1's search over Z1's 51 complete rebuilds stops at the same 27 from none taken and from all taken, and the whole game takes 180,199 bits (0.9776 of 184,328; 4,129 fewer); all 51 taken it would take 186,419. 36 of the 51 are smaller than their builds alone, 51,065 bits against 57,682 together; the 27 taken 21,606 against 28,215. Parts: opening 845, library 73,329 (837 maps, 129 beyond G3's library, 14 of those beyond G4's), 409 strategies 54,952, builds at 51 ply-6 positions 51,073.",
+      "mode": "test",
+      "proof": "tests/test_c49_z1_after_evidence.py::test_c49_z1_27_of_the_51_rebuilds_take_the_whole_game_to_180_199_bits",
+      "note": "",
+      "registered_at": "2026-11-04T13:22:16.025219+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z1_after_evidence.py::test_c49_z1_27_of_the_51_rebuilds_take_the_whole_game_to_180_199_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 185.95s (0:03:05)",
+          "drawn_at": "2026-11-04T13:25:36.538909+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_z1.json.gz",
+        "started": "2026-11-04T03:09:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_z1_after_evidence.py": "e776902d9c79a532b5ecf9fb9a0e73af395b2f73d3b9fed2674c491e2baafc0c",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072"
+      }
+    },
+    "h364": {
+      "id": "h364",
+      "claim": "\u00a73.6 X2's probe (after the data): walking Z1's 51 rebuilds with no build, the 2,598 maps with their cells flipped cover none of the 343 move nodes; the same maps read on the mirrored board cover 18, in 7 rebuilds, whose subtrees hold 260 of the 2,245 nodes, 166 of them in #2's 215.",
+      "mode": "test",
+      "proof": "tests/test_c49_x2_probe_evidence.py::test_c49_x2_only_the_mirrored_reading_covers_move_nodes",
+      "note": "",
+      "registered_at": "2026-11-04T14:33:08.064448+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x2_probe_evidence.py::test_c49_x2_only_the_mirrored_reading_covers_move_nodes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-11-04T14:33:39.856367+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x2_probe.json.gz",
+        "started": "2026-11-04T14:30:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x2_probe_evidence.py": "227fc57d5a606cd3a88dce53cc9dfe549a9fa9a04b160cdfa8267b69d36bbbab",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37"
+      }
+    },
+    "h365": {
+      "id": "h365",
+      "claim": "\u00a73.6 X2: the 51 ply-6 builds the assembled whole game takes (180,199 bits; Z1's game), each rebuilt at the same position with the same root move, with the builder Z1 rebuilt them with (6-hour cap), from the same 2,598 maps with every map also readable on the mirrored board (harness.mirror_builder) \u2014 48 or more of the 51 complete (40 or fewer refutes).",
+      "mode": "test",
+      "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_48_of_the_51_rebuilds_complete",
+      "note": "",
+      "registered_at": "2026-11-04T14:33:08.158646+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_x2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072"
+      },
+      "inconclusive_proof": "tests/test_c49_x2_evidence.py::test_c49_x2_completion_is_undecidable"
+    },
+    "h366": {
+      "id": "h366",
+      "claim": "\u00a73.6 X2: reading the library on the mirrored board shrinks the assembled whole game \u2014 with X2's complete rebuilds as candidates for the builds they replace, a mirrored reading paying its map once with the plain one, chosen by U1's search from none taken and from all taken (never worse than 180,199), the whole game takes 97/100 of 180,199 bits or less (99/100 or more refutes once every rebuild finished).",
+      "mode": "test",
+      "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_the_whole_game_with_the_mirror_takes_97_100_of_180_199_or_less",
+      "note": "",
+      "registered_at": "2026-11-04T14:33:09.096504+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_x2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072"
+      },
+      "inconclusive_proof": "tests/test_c49_x2_evidence.py::test_c49_x2_the_size_is_undecidable"
     }
   }
 }

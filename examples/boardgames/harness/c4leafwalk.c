@@ -128,11 +128,80 @@ static int wins_in_two(uint64_t position, uint64_t mask, int c) {
     return 1;
 }
 
-/* The column a deciding level holding the n columns `at` (ascending) plays: the lowest, or under `tactics` the lowest
- * of those that win in two, else of those that do not lose in two, else the lowest. Mirrors Facts.pick. */
-static int pick(uint64_t position, uint64_t mask, const int *at, int n, int tactics) {
-    if (!tactics || n == 1) return at[0];
-    int best = at[0], best_rank = 4;
+#define ORDER_LOWEST 0
+#define ORDER_TACTICS 1
+#define ORDER_NET 2
+#define NET_INPUTS (3 * TOTAL + 3 * WIDTH)
+#define NET_MAX_HIDDEN 256
+
+static int net_hidden = 0;
+static int8_t net_q1[NET_INPUTS * NET_MAX_HIDDEN], net_qb1[NET_MAX_HIDDEN], net_q2[WIDTH * NET_MAX_HIDDEN],
+    net_qb2[WIDTH];
+static int64_t net_c1, net_cb1, net_c2, net_cb2;
+
+/* The net the order "net" scores with (harness.integer_net.IntegerNet): its integer steps (q1 hidden x inputs, q2
+ * outputs x hidden, row-major) and constants; 0 when its shape is not Connect-4's. */
+int c4_leaf_set_net(int n_in, int hidden, int n_out, const int8_t *q1, const int8_t *qb1, const int8_t *q2,
+                    const int8_t *qb2, int64_t c1, int64_t cb1, int64_t c2, int64_t cb2) {
+    if (n_in != NET_INPUTS || n_out != WIDTH || hidden < 1 || hidden > NET_MAX_HIDDEN) return 0;
+    for (int k = 0; k < hidden; k++)
+        for (int i = 0; i < NET_INPUTS; i++) net_q1[i * hidden + k] = q1[k * NET_INPUTS + i];
+    for (int k = 0; k < hidden; k++) net_qb1[k] = qb1[k];
+    for (int j = 0; j < WIDTH * hidden; j++) net_q2[j] = q2[j];
+    for (int j = 0; j < WIDTH; j++) net_qb2[j] = qb2[j];
+    net_c1 = c1;
+    net_cb1 = cb1;
+    net_c2 = c2;
+    net_cb2 = cb2;
+    net_hidden = hidden;
+    return 1;
+}
+
+/* The net's scores (its outputs over one positive unit) at a position of the side to move, its features those of
+ * harness.integer_net.features: each cell (row * 7 + col) own / the opponent's / empty, then for each column in `safe`
+ * (Facts.safe_moves, a bit a column) 1, wins in two, loses in two. */
+static void net_scores(uint64_t position, uint64_t mask, int safe, __int128 *out) {
+    int64_t a[NET_MAX_HIDDEN] = {0};
+    int active[NET_INPUTS], n = 0;
+    for (int row = 0; row < HEIGHT; row++)
+        for (int col = 0; col < WIDTH; col++) {
+            uint64_t bit = (uint64_t)1 << (col * H1 + row);
+            active[n++] = 3 * (row * WIDTH + col) + (!(mask & bit) ? 2 : (position & bit) ? 0 : 1);
+        }
+    for (int c = 0; c < WIDTH; c++) {
+        if (!(safe >> c & 1)) continue;
+        active[n++] = 3 * TOTAL + 3 * c;
+        if (wins_in_two(position, mask, c)) active[n++] = 3 * TOTAL + 3 * c + 1;
+        if (loses_in_two(position, mask, c)) active[n++] = 3 * TOTAL + 3 * c + 2;
+    }
+    for (int i = 0; i < n; i++) {
+        const int8_t *row = net_q1 + active[i] * net_hidden;
+        for (int k = 0; k < net_hidden; k++) a[k] += row[k];
+    }
+    for (int j = 0; j < WIDTH; j++) {
+        int64_t sum = 0;
+        for (int k = 0; k < net_hidden; k++) {
+            int64_t h = net_c1 * a[k] + net_cb1 * net_qb1[k];
+            if (h > 0) sum += net_q2[j * net_hidden + k] * h;
+        }
+        out[j] = (__int128)net_c2 * sum + (__int128)net_cb2 * net_qb2[j];
+    }
+}
+
+/* The column a deciding level holding the n columns `at` (ascending) plays, by `order`: the lowest; under tactics the
+ * lowest of those that win in two, else of those that do not lose in two, else the lowest; under net the one the net
+ * scores highest (features from `safe`), else the lowest. Mirrors Facts.pick. */
+static int pick(uint64_t position, uint64_t mask, const int *at, int n, int order, int safe) {
+    if (order == ORDER_LOWEST || n == 1) return at[0];
+    int best = at[0];
+    if (order == ORDER_NET) {
+        __int128 scores[WIDTH];
+        net_scores(position, mask, safe, scores);
+        for (int i = 1; i < n; i++)
+            if (scores[at[i]] > scores[best]) best = at[i];
+        return best;
+    }
+    int best_rank = 4;
     for (int i = 0; i < n; i++) {
         int rank = (!wins_in_two(position, mask, at[i])) * 2 + loses_in_two(position, mask, at[i]);
         if (rank < best_rank) {
@@ -163,10 +232,10 @@ static int forces(uint64_t position, uint64_t mask, int c) {
 
 /* The rule's column at a position of the side to move, or -1 where it gives none; *immediate set when it wins at
  * once. Mirrors harness.steady_state.Facts.of and choose (`ties_lowest`: Facts.ties == "lowest"; `safe_depth`:
- * Facts.safe_depth; `forcing`: Facts.forcing; `unlevelled_last`: Facts.unlevelled == "last"; `tactics`:
- * Facts.order == "tactics"). */
+ * Facts.safe_depth; `forcing`: Facts.forcing; `unlevelled_last`: Facts.unlevelled == "last"; `order`: Facts.order,
+ * an ORDER_* code). */
 static int rule_move(uint64_t position, uint64_t mask, const int8_t *levels, int n_levels, int ties_lowest,
-                     int safe_depth, int forcing, int unlevelled_last, int tactics, int *immediate) {
+                     int safe_depth, int forcing, int unlevelled_last, int order, int *immediate) {
     int safe[WIDTH], cells[WIDTH], n_safe = 0;
     *immediate = 0;
     for (int c = 0; c < WIDTH; c++) {
@@ -201,6 +270,8 @@ static int rule_move(uint64_t position, uint64_t mask, const int8_t *levels, int
             }
         if (kept) n_safe = kept;
     }
+    int safe_bits = 0;
+    for (int i = 0; i < n_safe; i++) safe_bits |= 1 << safe[i];
     if (forcing && n_safe > 1) {
         int kept = 0;
         for (int i = 0; i < n_safe; i++)
@@ -217,13 +288,13 @@ static int rule_move(uint64_t position, uint64_t mask, const int8_t *levels, int
         int count = 0;
         for (int i = 0; i < n_safe; i++)
             if (levels[cells[i]] == k) at[count++] = safe[i];
-        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);
+        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, order, safe_bits);
     }
     if (unlevelled_last) {
         int count = 0;
         for (int i = 0; i < n_safe; i++)
             if (levels[cells[i]] < 0) at[count++] = safe[i];
-        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);
+        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, order, safe_bits);
     }
     return -1;
 }
@@ -261,7 +332,7 @@ static double now(void) {
  * exception plays the lowest winning column (written as (position, mask, column) triples). Positions are visited in
  * the Python walks' order, so counts match them even at a failure. */
 static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int order, int64_t cap,
                 double seconds, int verify_only, uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move,
                 int64_t max_exceptions, int64_t *n_exceptions, int64_t *own_positions, int64_t *positions) {
     *n_exceptions = 0;
@@ -312,7 +383,7 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
             (*own_positions)++;
             const int8_t *phase = switch_at >= 0 && s.moves >= switch_at ? levels + TOTAL : levels;
             int immediate, move = rule_move(s.position, s.mask, phase, n_levels, ties_lowest, safe_depth, forcing,
-                                            unlevelled_last, tactics, &immediate);
+                                            unlevelled_last, order, &immediate);
             if (verify_only && move < 0) {
                 status = VERIFY_UNDEFINED;
                 break;
@@ -353,21 +424,21 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
 
 /* harness.steady_exceptions.needed: a WALK_* status; on WALK_OK the exceptions and *own_positions are set. */
 int c4_leaf_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                 int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                 int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int order, int64_t cap,
                  double seconds, uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move, int64_t max_exceptions,
                  int64_t *n_exceptions, int64_t *own_positions) {
     int64_t positions;
     return walk(root_position, root_mask, root_moves, levels, n_levels, switch_at, ties_lowest, safe_depth, forcing,
-                unlevelled_last, tactics, cap, seconds, 0, exc_position, exc_mask, exc_move, max_exceptions, n_exceptions,
+                unlevelled_last, order, cap, seconds, 0, exc_position, exc_mask, exc_move, max_exceptions, n_exceptions,
                 own_positions, &positions);
 }
 
 /* harness.steady_state.verify: 0 when every line is won, else WALK_CAP, WALK_TIMEOUT, VERIFY_UNDEFINED, VERIFY_DRAW,
  * VERIFY_LOSS or WALK_OUT_OF_MEMORY; *own_positions and *positions as walked. */
 int c4_verify_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                   int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int tactics, int64_t cap,
+                   int switch_at, int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int order, int64_t cap,
                    double seconds, int64_t *own_positions, int64_t *positions) {
     int64_t n_exceptions;
     return walk(root_position, root_mask, root_moves, levels, n_levels, switch_at, ties_lowest, safe_depth, forcing,
-                unlevelled_last, tactics, cap, seconds, 1, NULL, NULL, NULL, 0, &n_exceptions, own_positions, positions);
+                unlevelled_last, order, cap, seconds, 1, NULL, NULL, NULL, 0, &n_exceptions, own_positions, positions);
 }

@@ -11,6 +11,7 @@ import pytest
 from games.connect4 import Connect4
 from games.kalah import Kalah
 from games.tictactoe import TicTacToe, TTTState
+from harness.integer_net import IntegerNet, features
 from harness.steady_state import SWITCH, Facts, choose, map_bits, phase_cell, restrict, simplify, verify
 
 
@@ -276,6 +277,72 @@ def test_tactics_are_worked_out_only_where_a_tie_can_need_them(monkeypatch, orde
     monkeypatch.setattr(facts, "_loses_in_two", lambda s, a: calls.append(a))
     monkeypatch.setattr(facts, "_wins_in_two", lambda s, a: calls.append(a))
     choose(facts, state, {}, 2)
+    assert calls == []
+
+
+def _net(bias=None, wins_in_two=False):
+    """A tic-tac-toe net (54 features: 27 cell, 27 move facts; 9 outputs) at 4 bits: with `bias` its outputs are those
+    alone; with `wins_in_two` hidden unit a is move a's wins-in-two fact and output a seven times it."""
+    w1 = [[0.0] * 54 for _ in range(9)]
+    w2 = [[0.0] * 9 for _ in range(9)]
+    if wins_in_two:
+        for a in range(9):
+            w1[a][27 + 3 * a + 1] = 1.0
+            w2[a][a] = 7.0
+    return IntegerNet({"layers.0.weight": w1, "layers.0.bias": [0.0] * 9, "layers.2.weight": w2,
+                       "layers.2.bias": bias or [0.0] * 9}, 4)
+
+
+UPWARD = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="net", net=_net([0, 1, 2, 3, 4, 5, 6, 7, 7]))
+LEARNED = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="net", net=_net(wins_in_two=True))
+
+
+def test_a_net_order_needs_a_net_and_a_net_needs_its_order():
+    with pytest.raises(ValueError, match="net"):
+        Facts(TicTacToe(), ties="lowest", order="net")
+    with pytest.raises(ValueError, match="net"):
+        Facts(TicTacToe(), ties="lowest", order="tactics", net=_net())
+    with pytest.raises(ValueError, match="order"):
+        Facts(TicTacToe(), order="net", net=_net())
+
+
+def test_with_a_net_a_tie_goes_to_the_move_it_scores_highest():
+    assert choose(UPWARD, WIN_IN_TWO, {}, 2) == 7 and choose(LEARNED, WIN_IN_TWO, {}, 2) == 6
+    assert choose(UPWARD, LOSE_IN_TWO, {}, 2) == 7 and choose(LEARNED, LOSE_IN_TWO, {}, 2) == 3
+
+
+def test_with_a_net_the_lowest_breaks_an_even_score():
+    assert choose(UPWARD, _ttt((0, 1), (2, 3)), {}, 2) == 7
+    assert choose(LEARNED, WIN_IN_TWO, {3: 0, 7: 0}, 2) == 3
+
+
+def test_with_a_net_only_the_deciding_level_is_ordered():
+    assert choose(LEARNED, WIN_IN_TWO, {3: 0, 6: 0, 7: 0}, 2) == 6
+    assert choose(LEARNED, WIN_IN_TWO, {3: 0, 7: 0, 6: 1}, 2) == 3
+    assert choose(UPWARD, LOSE_IN_TWO, {3: 0, 4: 1}, 2) == 3
+
+
+def test_a_net_changes_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one():
+    assert choose(UPWARD, _ttt((0, 1), (3, 4)), {5: 0}, 2) == 2
+    assert choose(UPWARD, _ttt((0, 8), (4, 2)), {3: 0}, 2) == 6
+    assert choose(UPWARD, WIN_IN_TWO, {3: 0}, 2) == 3
+
+
+def test_a_net_scores_a_position_once(monkeypatch):
+    facts = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="net", net=_net(wins_in_two=True))
+    calls = []
+    real = facts.net.scores
+    monkeypatch.setattr(facts.net, "scores", lambda x: calls.append(x) or real(x))
+    choose(facts, WIN_IN_TWO, {}, 2)
+    choose(facts, WIN_IN_TWO, {3: 0, 7: 0}, 2)
+    assert len(calls) == 1 and calls[0] == features(TicTacToe(), facts, WIN_IN_TWO)
+
+
+def test_a_net_scores_only_where_a_tie_can_need_it(monkeypatch):
+    facts = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="net", net=_net())
+    calls = []
+    monkeypatch.setattr(facts.net, "scores", lambda x: calls.append(x))
+    choose(facts, _ttt((0, 8), (4, 2)), {}, 2)
     assert calls == []
 
 

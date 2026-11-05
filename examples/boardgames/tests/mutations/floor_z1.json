@@ -1,0 +1,257 @@
+{
+  "file": "harness/floor_z1.py",
+  "tests": ["tests/test_floor_z1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "own integrity unchecked",
+      "old": "if _integrity(e, spec) or _integrity(g4_run, g4_spec) or",
+      "new": "if _integrity(g4_run, g4_spec) or"
+    },
+    {
+      "name": "G4's integrity unchecked",
+      "old": "if _integrity(e, spec) or _integrity(g4_run, g4_spec) or",
+      "new": "if _integrity(e, spec) or"
+    },
+    {
+      "name": "earlier integrity unchecked",
+      "old": " or any(_integrity(run, s) for run, s in earlier):",
+      "new": ":"
+    },
+    {
+      "name": "positions unchecked",
+      "old": "    if any(rank.get(_key(r)) != r[\"index\"] for r in rows + e[\"roots\"]):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "rebuilds' positions unchecked",
+      "old": "for r in rows + e[\"roots\"]):",
+      "new": "for r in rows):"
+    },
+    {
+      "name": "earlier rows' positions unchecked",
+      "old": "for r in rows + e[\"roots\"]):",
+      "new": "for r in e[\"roots\"]):"
+    },
+    {
+      "name": "earlier rows' library unchecked",
+      "old": "    if not all(j1_valid(r, assembly[\"library\"]) for r in rows):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "the builds taken unchecked",
+      "old": "    if sorted(taken, key=_order) != spec[\"root_moves\"]:\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "rebuilds' moves unchecked",
+      "old": "(sorted(([r[\"index\"], r[\"root_move\"]] for r in e[\"roots\"]), key=_order) != spec[\"root_moves\"]\n            or any(",
+      "new": "(any("
+    },
+    {
+      "name": "root moves played unchecked",
+      "old": "\n            or any(r[\"root_move\"] is not None and _root_move(r) != r[\"root_move\"] for r in e[\"roots\"])):",
+      "new": "):"
+    },
+    {
+      "name": "free builds held to a root move",
+      "old": "any(r[\"root_move\"] is not None and _root_move(r)",
+      "new": "any(_root_move(r)"
+    },
+    {
+      "name": "kept positions unchecked",
+      "old": "if sorted(r[\"index\"] for r in kept) != spec[\"kept\"] or not all(",
+      "new": "if not all("
+    },
+    {
+      "name": "kept rebuilds' library unchecked",
+      "old": " or not all(j1_valid(r, g4_lib) for r in kept):",
+      "new": ":"
+    },
+    {
+      "name": "rebuilds' library unchecked",
+      "old": "    if not all(j1_valid(r, library) for r in done):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "unfinished rebuilds taken",
+      "old": "done = [r for r in e[\"roots\"] if r[\"complete\"]]",
+      "new": "done = e[\"roots\"]"
+    },
+    {
+      "name": "control unchecked",
+      "old": "    if control != spec[\"control_bits\"]:\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "kept rebuilds not in the game",
+      "old": "base = {**assembly[\"base\"], **{_key(r): j1_piece(r, g4_lib) for r in kept}}",
+      "new": "base = dict(assembly[\"base\"])"
+    },
+    {
+      "name": "kept rebuilds read against Z1's library",
+      "old": "j1_piece(r, g4_lib) for r in kept",
+      "new": "j1_piece(r, library) for r in kept"
+    },
+    {
+      "name": "rebuilds read against G4's library",
+      "old": "rebuilds = {_key(r): j1_piece(r, library) for r in done}",
+      "new": "rebuilds = {_key(r): j1_piece(r, g4_lib) for r in done}"
+    },
+    {
+      "name": "new maps free",
+      "old": "if i > len(assembly[\"library\"])}}",
+      "new": "if i > len(library)}}"
+    },
+    {
+      "name": "the search sees no rebuild",
+      "old": "{**built, **{k: rebuilds[k] for k in held}}",
+      "new": "built"
+    },
+    {
+      "name": "only the start from none",
+      "old": "u1_choose(size, plays, frozenset(rebuilds))),",
+      "new": "u1_choose(size, plays, frozenset())),"
+    },
+    {
+      "name": "only the start from all",
+      "old": "(u1_choose(size, plays, frozenset()), u1_choose",
+      "new": "(u1_choose(size, plays, frozenset(rebuilds)), u1_choose"
+    },
+    {
+      "name": "the larger start kept",
+      "old": "held, bits = min((u1_choose",
+      "new": "held, bits = max((u1_choose"
+    },
+    {
+      "name": "unfinished can refute",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "unfinished never reported",
+      "old": "unfinished = len(done) < len(e[\"roots\"])",
+      "new": "unfinished = False"
+    },
+    {
+      "name": "support exclusive",
+      "old": "if den * bits <= num * control else",
+      "new": "if den * bits < num * control else"
+    },
+    {
+      "name": "refute exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "library out of position order",
+      "old": "for i in spec[\"kept\"] for m in own[i]]",
+      "new": "for i in own if i in spec[\"kept\"] for m in own[i]]"
+    },
+    {
+      "name": "library without the kept maps",
+      "old": "return [*library] + [m for i in spec[\"kept\"] for m in own[i]]",
+      "new": "return [*library]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-04T03:04:29+00:00",
+    "killed": 30,
+    "survived": [],
+    "killed_by": {
+      "own integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "G4's integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "earlier integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "positions unchecked": ["test_a_row_at_another_position_than_its_index_is_not_run"],
+      "rebuilds' positions unchecked": ["test_a_row_at_another_position_than_its_index_is_not_run"],
+      "earlier rows' positions unchecked": [
+        "test_a_row_at_another_position_than_its_index_is_not_run"
+      ],
+      "earlier rows' library unchecked": [
+        "test_rows_off_their_library_are_not_run_unless_unfinished"
+      ],
+      "the builds taken unchecked": ["test_builds_other_than_the_game_takes_are_not_run"],
+      "rebuilds' moves unchecked": ["test_rebuilds_other_than_the_registered_are_not_run"],
+      "root moves played unchecked": ["test_a_rebuild_off_its_root_move_is_not_run"],
+      "free builds held to a root move": [
+        "test_a_kept_rebuild_s_own_piece_is_read_against_g4_s_library",
+        "test_a_larger_rebuild_leaves_its_build",
+        "test_a_map_the_game_already_pays_costs_a_rebuild_nothing",
+        "test_a_rebuild_off_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute",
+        "test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "kept positions unchecked": ["test_a_kept_rebuild_g4_does_not_hold_or_finish_is_not_run"],
+      "kept rebuilds' library unchecked": [
+        "test_a_kept_rebuild_g4_does_not_hold_or_finish_is_not_run",
+        "test_rows_off_their_library_are_not_run_unless_unfinished"
+      ],
+      "rebuilds' library unchecked": ["test_rows_off_their_library_are_not_run_unless_unfinished"],
+      "unfinished rebuilds taken": [
+        "test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute",
+        "test_rows_off_their_library_are_not_run_unless_unfinished"
+      ],
+      "control unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "kept rebuilds not in the game": [
+        "test_a_kept_rebuild_s_own_piece_is_read_against_g4_s_library",
+        "test_a_larger_rebuild_leaves_its_build",
+        "test_a_map_the_game_already_pays_costs_a_rebuild_nothing",
+        "test_a_rebuild_off_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute",
+        "test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "kept rebuilds read against Z1's library": [
+        "test_a_kept_rebuild_s_own_piece_is_read_against_g4_s_library"
+      ],
+      "rebuilds read against G4's library": [
+        "test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once"
+      ],
+      "new maps free": ["test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once"],
+      "the search sees no rebuild": [
+        "test_a_kept_rebuild_s_own_piece_is_read_against_g4_s_library",
+        "test_a_map_the_game_already_pays_costs_a_rebuild_nothing",
+        "test_a_rebuild_off_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute",
+        "test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once",
+        "test_the_bars_are_inclusive",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "only the start from none": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "only the start from all": [
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "the larger start kept": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "unfinished can refute": ["test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute"],
+      "unfinished never reported": ["test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute"],
+      "support exclusive": ["test_the_bars_are_inclusive"],
+      "refute exclusive": ["test_the_bars_are_inclusive"],
+      "library out of position order": [
+        "test_the_library_follows_the_positions_not_the_order_they_finished"
+      ],
+      "library without the kept maps": [
+        "test_a_kept_rebuild_s_own_piece_is_read_against_g4_s_library",
+        "test_a_larger_rebuild_leaves_its_build",
+        "test_a_map_the_game_already_pays_costs_a_rebuild_nothing",
+        "test_a_rebuild_off_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_keeps_its_build_and_cannot_refute",
+        "test_rebuilds_sharing_a_new_map_come_in_together_and_pay_it_once",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_library_follows_the_positions_not_the_order_they_finished",
+        "test_the_library_is_g4_s_then_the_kept_rebuilds_own_maps",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ]
+    }
+  }
+}

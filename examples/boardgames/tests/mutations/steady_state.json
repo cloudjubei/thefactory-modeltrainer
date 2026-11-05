@@ -225,8 +225,8 @@
     },
     {
       "name": "unlevelled last by default",
-      "old": "                 unlevelled: str = \"none\", order: str = \"lowest\"):",
-      "new": "                 unlevelled: str = \"last\", order: str = \"lowest\"):"
+      "old": "                 unlevelled: str = \"none\", order: str = \"lowest\", net=None):",
+      "new": "                 unlevelled: str = \"last\", order: str = \"lowest\", net=None):"
     },
     {
       "name": "unlevelled unchecked",
@@ -235,8 +235,8 @@
     },
     {
       "name": "tactics by default",
-      "old": "                 unlevelled: str = \"none\", order: str = \"lowest\"):",
-      "new": "                 unlevelled: str = \"none\", order: str = \"tactics\"):"
+      "old": "                 unlevelled: str = \"none\", order: str = \"lowest\", net=None):",
+      "new": "                 unlevelled: str = \"none\", order: str = \"tactics\", net=None):"
     },
     {
       "name": "any order accepted",
@@ -357,15 +357,52 @@
       "name": "the second phase's levels free",
       "old": " + empty + level_bits * len(second)",
       "new": " + empty"
+    },
+    {
+      "name": "no net order",
+      "old": "ORDERS = (\"lowest\", \"tactics\", \"net\")",
+      "new": "ORDERS = (\"lowest\", \"tactics\")"
+    },
+    {
+      "name": "a net without its order",
+      "old": "        if (order == \"net\") != (net is not None):",
+      "new": "        if order == \"net\" and net is None:"
+    },
+    {
+      "name": "a net order without a net",
+      "old": "        if (order == \"net\") != (net is not None):",
+      "new": "        if order != \"net\" and net is not None:"
+    },
+    {
+      "name": "net never scores",
+      "old": "                ranks.update({a: (-scores[a], a) for a in chosen})",
+      "new": "                ranks.update({a: (a,) for a in chosen})"
+    },
+    {
+      "name": "net plays its lowest score",
+      "old": "                ranks.update({a: (-scores[a], a) for a in chosen})",
+      "new": "                ranks.update({a: (scores[a], a) for a in chosen})"
+    },
+    {
+      "name": "net ties go to the highest",
+      "old": "                ranks.update({a: (-scores[a], a) for a in chosen})",
+      "new": "                ranks.update({a: (-scores[a], -a) for a in chosen})"
+    },
+    {
+      "name": "scored without a tie",
+      "old": "            if self.order == \"net\" and len(chosen) > 1:",
+      "new": "            if self.order == \"net\":"
     }
   ],
+  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed)). 'losses before wins' (ranking a tie by losing in two before winning in two orders the moves the same way: a move winning by force in two never loses by force in two, so the three classes keep their order); 'an answer ending the game leaves no win in two' (a finished game has no legal moves, so it leaves no immediate win either way (the check was removed)). For phases: 'the switch dropped alone in simplify' (simplify tries dropping the second phase whole first; dropping only the switch plays as that does, so it can never succeed where the whole drop failed — the cell loop skips the switch to save that walk); 'the second phase reads the switch key' (the switch's own key maps to -1, never a cell).",
   "last_run": {
-    "at": "2026-10-21T08:33:30+00:00",
-    "killed": 71,
+    "at": "2026-10-29T07:39:00+00:00",
+    "killed": 78,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
       "win not played first": [
+        "test_a_net_changes_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
         "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
         "test_a_verify_within_its_deadline_is_unchanged",
         "test_a_walk_past_the_cap_is_rejected",
@@ -386,6 +423,8 @@
       "single safe move not forced": [
         "test_a_forced_draw_is_rejected",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_a_net_changes_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
+        "test_a_net_scores_only_where_a_tie_can_need_it",
         "test_tactics_are_worked_out_only_where_a_tie_can_need_them[tactics-state1]",
         "test_tactics_change_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
         "test_the_only_safe_move_is_played_whatever_the_map",
@@ -407,6 +446,7 @@
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_tactics_only_the_deciding_level_is_ordered",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
@@ -415,6 +455,8 @@
       ],
       "unsafe moves kept": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_a_net_changes_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
+        "test_a_net_scores_only_where_a_tie_can_need_it",
         "test_preferring_forcing_moves_changes_neither_the_wins_nor_a_forced_safe_move",
         "test_tactics_are_worked_out_only_where_a_tie_can_need_them[tactics-state1]",
         "test_tactics_change_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
@@ -424,8 +466,13 @@
         "test_unlevelled_cells_last_change_neither_the_wins_nor_a_forced_safe_move"
       ],
       "facts recomputed": [
+        "test_a_net_changes_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one",
+        "test_a_net_scores_a_position_once",
         "test_facts_are_computed_once_per_position",
-        "test_tactics_are_worked_out_once_per_position"
+        "test_tactics_are_worked_out_once_per_position",
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score"
       ],
       "draw accepted": [
         "test_a_forced_draw_is_rejected",
@@ -484,6 +531,8 @@
       "simplify deadline not passed": ["test_simplify_past_its_deadline_keeps_every_level"],
       "simplify ignores its verifier": ["test_simplify_uses_the_given_verifier"],
       "ties ignored": [
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score",
         "test_with_tactics_only_the_deciding_level_is_ordered",
         "test_with_tactics_the_lowest_breaks_what_is_left",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
@@ -508,6 +557,7 @@
         "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels4-4]"
       ],
       "lowest ties by default": [
+        "test_a_net_order_needs_a_net_and_a_net_needs_its_order",
         "test_a_switched_map_wins_where_no_one_phase_map_of_one_level_does",
         "test_an_order_needs_ties_to_break",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
@@ -522,6 +572,9 @@
       ],
       "ties not kept": [
         "test_ties_go_to_the_lowest_move_unless_told_otherwise",
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score",
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two",
         "test_with_tactics_only_the_deciding_level_is_ordered",
@@ -593,6 +646,8 @@
       "unlevelled last never read": [
         "test_the_last_level_is_read_like_any_other",
         "test_ties_go_to_the_lowest_move_unless_told_otherwise",
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_the_lowest_breaks_an_even_score",
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two",
         "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined",
@@ -605,6 +660,8 @@
       "unlevelled last ignores ties": ["test_the_last_level_is_read_like_any_other"],
       "unlevelled last highest": [
         "test_ties_go_to_the_lowest_move_unless_told_otherwise",
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_the_lowest_breaks_an_even_score",
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two",
         "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined",
@@ -619,7 +676,10 @@
       "unlevelled unchecked": ["test_unlevelled_cells_are_passed_over_unless_told_otherwise"],
       "tactics by default": [],
       "any order accepted": ["test_ties_go_to_the_lowest_move_unless_told_otherwise"],
-      "an order without ties to break": ["test_an_order_needs_ties_to_break"],
+      "an order without ties to break": [
+        "test_a_net_order_needs_a_net_and_a_net_needs_its_order",
+        "test_an_order_needs_ties_to_break"
+      ],
       "tactics ignore wins in two": [
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_only_the_deciding_level_is_ordered"
@@ -639,8 +699,13 @@
       "tactics worked out for a forced move": [
         "test_tactics_are_worked_out_only_where_a_tie_can_need_them[tactics-state1]"
       ],
-      "levels ignore the order": ["test_with_tactics_only_the_deciding_level_is_ordered"],
+      "levels ignore the order": [
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_tactics_only_the_deciding_level_is_ordered"
+      ],
       "unlevelled last ignores the order": [
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_the_lowest_breaks_an_even_score",
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two"
       ],
@@ -649,6 +714,8 @@
       ],
       "one answer without a threat suffices": [
         "test_a_move_wins_in_two_when_every_answer_leaves_an_immediate_win",
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
         "test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two",
         "test_with_tactics_only_the_deciding_level_is_ordered",
         "test_with_tactics_the_lowest_breaks_what_is_left"
@@ -693,8 +760,26 @@
       ],
       "the second phase's levels free": [
         "test_a_switched_map_pays_for_its_switch_and_its_second_phase_as_for_its_first"
-      ]
+      ],
+      "no net order": [],
+      "a net without its order": ["test_a_net_order_needs_a_net_and_a_net_needs_its_order"],
+      "a net order without a net": ["test_a_net_order_needs_a_net_and_a_net_needs_its_order"],
+      "net never scores": [
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score"
+      ],
+      "net plays its lowest score": [
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score"
+      ],
+      "net ties go to the highest": [
+        "test_with_a_net_a_tie_goes_to_the_move_it_scores_highest",
+        "test_with_a_net_only_the_deciding_level_is_ordered",
+        "test_with_a_net_the_lowest_breaks_an_even_score"
+      ],
+      "scored without a tie": ["test_a_net_scores_only_where_a_tie_can_need_it"]
     }
-  },
-  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed)). 'losses before wins' (ranking a tie by losing in two before winning in two orders the moves the same way: a move winning by force in two never loses by force in two, so the three classes keep their order); 'an answer ending the game leaves no win in two' (a finished game has no legal moves, so it leaves no immediate win either way (the check was removed)). For phases: 'the switch dropped alone in simplify' (simplify tries dropping the second phase whole first; dropping only the switch plays as that does, so it can never succeed where the whole drop failed — the cell loop skips the switch to save that walk); 'the second phase reads the switch key' (the switch's own key maps to -1, never a cell)."
+  }
 }

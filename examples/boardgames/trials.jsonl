@@ -288,3 +288,28 @@
 {"event": "end", "id": "5db54e1f65ca", "status": "completed", "at": "2026-10-25T23:16:11+00:00", "seconds": 273542.4}
 {"event": "end", "id": "ea971a293ed3", "status": "completed", "at": "2026-10-26T00:53:57+00:00", "seconds": 321306.1}
 {"event": "start", "id": "189f0371191f", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g3", "--workers", "4", "--out", "evidence/c49_g3.json.gz", "--progress", "checkpoints/runs/c49_g3_progress.json"], "at": "2026-10-26T07:38:16+00:00"}
+{"event": "end", "id": "189f0371191f", "status": "completed", "at": "2026-10-27T22:38:40+00:00", "seconds": 140424.4}
+{"event": "start", "id": "00250a8c366f", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_n2", "--workers", "4", "--out", "evidence/c49_n2.json.gz", "--progress", "checkpoints/runs/c49_n2_progress.json"], "at": "2026-10-29T07:48:36+00:00"}
+{"event": "end", "id": "00250a8c366f", "status": "completed", "at": "2026-10-29T19:51:37+00:00", "seconds": 43381.0}
+{"event": "start", "id": "23c3fe2d3d7a", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_r2", "--workers", "4", "--out", "evidence/c49_r2.json.gz", "--progress", "checkpoints/runs/c49_r2_progress.json"], "at": "2026-10-29T20:50:41+00:00"}
+{"event": "start", "id": "e14699a9aeee", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_r2", "--workers", "4", "--out", "evidence/c49_r2.json.gz", "--progress", "checkpoints/runs/c49_r2_progress.json", "--resume"], "at": "2026-10-29T22:39:38+00:00"}
+{"event": "start", "id": "de6c92e9f8fe", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_e1", "--workers", "4", "--out", "evidence/c49_e1.json.gz", "--progress", "checkpoints/runs/c49_e1_progress.json"], "at": "2026-10-30T02:42:48+00:00"}
+{"event": "end", "id": "de6c92e9f8fe", "status": "failed", "error": "KeyError: 'seed'", "at": "2026-10-30T02:42:49+00:00", "seconds": 0.6}
+{"event": "start", "id": "84c76f734a3c", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_e1", "--workers", "4", "--out", "evidence/c49_e1.json.gz", "--progress", "checkpoints/runs/c49_e1_progress.json"], "at": "2026-10-30T02:45:50+00:00"}
+{"event": "end", "id": "e14699a9aeee", "status": "completed", "at": "2026-10-30T02:51:29+00:00", "seconds": 15111.3}
+{"event": "end", "id": "84c76f734a3c", "status": "completed", "at": "2026-10-30T09:16:33+00:00", "seconds": 23442.9}
+{"event": "start", "id": "338e921b502c", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_o1", "--workers", "4", "--out", "evidence/c49_o1.json.gz", "--progress", "checkpoints/runs/c49_o1_progress.json"], "at": "2026-10-30T10:39:42+00:00"}
+{"event": "end", "id": "338e921b502c", "status": "completed", "at": "2026-10-30T18:25:43+00:00", "seconds": 27961.6}
+{"event": "start", "id": "e19b356bb266", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_e3", "--workers", "7", "--out", "evidence/c49_e3.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/e3_progress.json"], "at": "2026-11-01T08:59:47+00:00"}
+{"event": "end", "id": "e19b356bb266", "status": "completed", "at": "2026-11-01T15:24:53+00:00", "seconds": 23106.0}
+{"event": "start", "id": "813cae6e70ba", "name": "c4_strategy_s2", "argv": ["--workers", "7", "--spec", "harness.floor_v1", "--out", "evidence/c49_v1.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/v1_progress.json"], "at": "2026-11-01T19:17:26+00:00"}
+{"event": "end", "id": "813cae6e70ba", "status": "completed", "at": "2026-11-02T14:43:19+00:00", "seconds": 69953.2}
+{"event": "start", "id": "eaf2c57fc236", "name": "c4_strategy_s2", "argv": ["--workers", "7", "--spec", "harness.floor_v2", "--out", "evidence/c49_v2.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/v2_progress.json"], "at": "2026-11-02T15:57:07+00:00"}
+{"event": "end", "id": "eaf2c57fc236", "status": "completed", "at": "2026-11-03T09:08:32+00:00", "seconds": 61884.3}
+{"event": "start", "id": "2d384b3e480d", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_g4", "--workers", "7", "--out", "evidence/c49_g4.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/g4_progress.json"], "at": "2026-11-03T13:46:55+00:00"}
+{"event": "end", "id": "2d384b3e480d", "status": "completed", "at": "2026-11-03T22:13:37+00:00", "seconds": 30402.3}
+{"event": "start", "id": "2b813f041437", "name": "c4_strategy_s2", "argv": ["--help"], "at": "2026-11-04T03:04:40+00:00"}
+{"event": "end", "id": "2b813f041437", "status": "failed", "error": "SystemExit: 0", "at": "2026-11-04T03:04:40+00:00", "seconds": 0.1}
+{"event": "start", "id": "7e3bf91c9779", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_z1", "--workers", "7", "--out", "evidence/c49_z1.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/z1_progress.json"], "at": "2026-11-04T03:09:19+00:00"}
+{"event": "end", "id": "7e3bf91c9779", "status": "completed", "at": "2026-11-04T13:10:46+00:00", "seconds": 36087.2}
+{"event": "start", "id": "cbb86d8c7c8c", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_x2", "--workers", "7", "--out", "evidence/c49_x2.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/x2_progress.json"], "at": "2026-11-04T14:33:53+00:00"}

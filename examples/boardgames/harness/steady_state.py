@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import time
 
+from harness.integer_net import features
 
 TIES = ("exact", "lowest")
 UNLEVELLED = ("none", "last")
-ORDERS = ("lowest", "tactics")
+ORDERS = ("lowest", "tactics", "net")
 SWITCH = -1
 
 
@@ -60,10 +61,11 @@ class Facts:
     safe moves on cells the map leaves without a level: "none" — passes them over; "last" — reads them as one more level
     after the map's, by `ties` like any other. `order` is which move a deciding level holding several plays (so only
     with `ties` "lowest"): "lowest" — the lowest-numbered; "tactics" — the lowest of those that win by force in two,
-    else of those that do not lose by force in two (`_loses_in_two`), else the lowest."""
+    else of those that do not lose by force in two (`_loses_in_two`), else the lowest; "net" — the one `net` (a
+    harness.integer_net.IntegerNet over harness.integer_net.features) scores highest, else the lowest."""
 
     def __init__(self, game, limit: int = 2_000_000, ties: str = "exact", safe_depth: int = 1, forcing: bool = False,
-                 unlevelled: str = "none", order: str = "lowest"):
+                 unlevelled: str = "none", order: str = "lowest", net=None):
         if ties not in TIES:
             raise ValueError(f"ties must be one of {TIES}, got {ties!r}")
         if safe_depth not in (1, 2):
@@ -76,12 +78,15 @@ class Facts:
             raise ValueError(f"order must be one of {ORDERS}, got {order!r}")
         if order != "lowest" and ties != "lowest":
             raise ValueError(f"order {order!r} breaks ties, so it needs ties 'lowest', got {ties!r}")
+        if (order == "net") != (net is not None):
+            raise ValueError(f"order 'net' needs a net and a net needs order 'net', got order {order!r}")
         self.game = game
         self.ties = ties
         self.safe_depth = safe_depth
         self.forcing = forcing
         self.unlevelled = unlevelled
         self.order = order
+        self.net = net
         h, w = getattr(game, "board_shape")
         self.cells = h * w
         self.limit = limit
@@ -196,6 +201,9 @@ class Facts:
             ranks = ({a: (not self._wins_in_two(state, a), self._loses_in_two(state, a), a) for a in chosen}
                      if self.order == "tactics" and len(chosen) > 1 else {})
             self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in chosen}, safe, ranks)
+            if self.order == "net" and len(chosen) > 1:
+                scores = self.net.scores(features(game, self, state))
+                ranks.update({a: (-scores[a], a) for a in chosen})
         return self._facts[key]
 
 

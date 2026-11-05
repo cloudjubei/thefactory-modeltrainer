@@ -1,0 +1,131 @@
+{
+  "file": "harness/floor_o1.py",
+  "tests": ["tests/test_floor_o1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "e1's eight not excluded",
+      "old": "\"excluded\": E1[\"indices\"]",
+      "new": "\"excluded\": []"
+    },
+    {
+      "name": "other positions",
+      "old": "135, 140],",
+      "new": "135, 141],"
+    },
+    {
+      "name": "fewer roots",
+      "old": "\"roots\": 31,",
+      "new": "\"roots\": 30,"
+    },
+    {
+      "name": "completion bar lowered",
+      "old": "\"complete_support\": 29,",
+      "new": "\"complete_support\": 28,"
+    },
+    {
+      "name": "refutation bar raised",
+      "old": "\"complete_refute\": 25,",
+      "new": "\"complete_refute\": 26,"
+    },
+    {
+      "name": "size bar raised",
+      "old": "\"support\": (3, 4)",
+      "new": "\"support\": (4, 5)"
+    },
+    {
+      "name": "other g3 subtree bits",
+      "old": "\"g3_subtree_bits\": 51_312}",
+      "new": "\"g3_subtree_bits\": 51_313}"
+    },
+    {
+      "name": "other scope",
+      "old": "\"scope\": \"c49_o1_scope.json.gz\"",
+      "new": "\"scope\": \"c49_e1.json.gz\""
+    },
+    {
+      "name": "scope positions unchecked",
+      "old": "scope[\"positions_fp\"] != spec[\"positions_fp\"] or ",
+      "new": ""
+    },
+    {
+      "name": "scope library unchecked",
+      "old": " or scope[\"library_from\"] != spec[\"library_from\"]:",
+      "new": ":"
+    },
+    {
+      "name": "same picks selected",
+      "old": "if p[\"library_pick\"] != p[\"opening\"] and",
+      "new": "if p[\"library_pick\"] == p[\"opening\"] and"
+    },
+    {
+      "name": "excluded kept",
+      "old": " and p[\"index\"] not in spec[\"excluded\"])",
+      "new": ")"
+    },
+    {
+      "name": "selection unsorted",
+      "old": "    return sorted(p[\"index\"] for p in scope[\"positions\"]",
+      "new": "    return list(p[\"index\"] for p in scope[\"positions\"]"
+    },
+    {
+      "name": "selection unchecked",
+      "old": "    if o1_selected(scope, spec) != spec[\"indices\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "judged on e1's spec",
+      "old": "    return e1_size(e, g3, library, moves, spec)",
+      "new": "    return e1_size(e, g3, library, moves, E1)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-30T10:38:41+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "e1's eight not excluded": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "other positions": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "fewer roots": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "completion bar lowered": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "refutation bar raised": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "size bar raised": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "other g3 subtree bits": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "other scope": [
+        "test_o1_rebuilds_the_positions_the_builder_moves_differently_beyond_e1_s_eight"
+      ],
+      "scope positions unchecked": [
+        "test_a_scope_of_other_positions_or_another_library_selects_nothing",
+        "test_o1_is_judged_as_e1_only_on_the_registered_selection"
+      ],
+      "scope library unchecked": [
+        "test_a_scope_of_other_positions_or_another_library_selects_nothing"
+      ],
+      "same picks selected": [
+        "test_o1_is_judged_as_e1_only_on_the_registered_selection",
+        "test_the_selection_is_every_position_picked_differently_but_e1_s"
+      ],
+      "excluded kept": [
+        "test_o1_is_judged_as_e1_only_on_the_registered_selection",
+        "test_the_selection_is_every_position_picked_differently_but_e1_s"
+      ],
+      "selection unsorted": ["test_the_selection_is_every_position_picked_differently_but_e1_s"],
+      "selection unchecked": ["test_o1_is_judged_as_e1_only_on_the_registered_selection"],
+      "judged on e1's spec": ["test_o1_is_judged_as_e1_only_on_the_registered_selection"]
+    }
+  }
+}

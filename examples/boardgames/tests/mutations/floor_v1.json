@@ -1,0 +1,236 @@
+{
+  "file": "harness/floor_v1.py",
+  "tests": ["tests/test_floor_v1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "positions fingerprint unchecked",
+      "old": "if scope[\"positions_fp\"] != spec[\"positions_fp\"] or ",
+      "new": "if "
+    },
+    {
+      "name": "library source unchecked",
+      "old": " or scope[\"library_from\"] != spec[\"library_from\"]:",
+      "new": ":"
+    },
+    {
+      "name": "a position with one winning move selected",
+      "old": "if len(p[\"winning\"]) > 1 and ",
+      "new": "if "
+    },
+    {
+      "name": "the weight floor exclusive",
+      "old": "p[\"g3_bits\"] >= spec[\"min_g3_bits\"]",
+      "new": "p[\"g3_bits\"] > spec[\"min_g3_bits\"]"
+    },
+    {
+      "name": "no weight floor",
+      "old": " and p[\"g3_bits\"] >= spec[\"min_g3_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "built moves selected again",
+      "old": "for a in p[\"winning\"] if a not in played.get(p[\"index\"], set())]",
+      "new": "for a in p[\"winning\"]]"
+    },
+    {
+      "name": "a root leaf counts as every move",
+      "old": "if a not in played.get(p[\"index\"], set())]",
+      "new": "if a not in played.get(p[\"index\"], set()) and None not in played.get(p[\"index\"], set())]"
+    },
+    {
+      "name": "the run's integrity unchecked",
+      "old": "if _integrity(v, spec) or any(",
+      "new": "if any("
+    },
+    {
+      "name": "the earlier runs' integrity unchecked",
+      "old": "if _integrity(v, spec) or any(_integrity(e, s) for e, s in earlier):",
+      "new": "if _integrity(v, spec):"
+    },
+    {
+      "name": "selection unchecked",
+      "old": "if v1_selected(scope, rows, spec) != spec[\"root_moves\"]:",
+      "new": "if v1_selected(scope, rows, spec) is None:"
+    },
+    {
+      "name": "built moves unchecked",
+      "old": "if (sorted([r[\"index\"], r[\"root_move\"]] for r in v[\"roots\"]) != sorted(spec[\"root_moves\"])\n            or any(",
+      "new": "if (any("
+    },
+    {
+      "name": "root nodes unchecked",
+      "old": "\n            or any(_root_move(r) != r[\"root_move\"] for r in v[\"roots\"])):",
+      "new": "):"
+    },
+    {
+      "name": "earlier pieces unvalidated",
+      "old": "if not all(j1_valid(r, library) for r in rows + [",
+      "new": "if not all(j1_valid(r, library) for r in ["
+    },
+    {
+      "name": "new pieces unvalidated",
+      "old": "for r in rows + [r for r in v[\"roots\"] if r[\"complete\"]]):",
+      "new": "for r in rows):"
+    },
+    {
+      "name": "unfinished pieces validated",
+      "old": "for r in rows + [r for r in v[\"roots\"] if r[\"complete\"]]):",
+      "new": "for r in rows + v[\"roots\"]):"
+    },
+    {
+      "name": "control unchecked",
+      "old": "    if control != spec[\"j1_bits\"]:\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "an unfinished build is a candidate",
+      "old": "[(1, r) for r in v[\"roots\"] if r[\"complete\"]]",
+      "new": "[(1, r) for r in v[\"roots\"]]"
+    },
+    {
+      "name": "the new builds left out",
+      "old": "choose(earlier_pieces + [(1, r) for r in v[\"roots\"] if r[\"complete\"]])",
+      "new": "choose(earlier_pieces)"
+    },
+    {
+      "name": "taken counts earlier builds",
+      "old": "for n, i, a in chosen.values() if n == 1)",
+      "new": "for n, i, a in chosen.values())"
+    },
+    {
+      "name": "the worse game kept",
+      "old": "    if bits > control:\n        bits, taken = control, []\n",
+      "new": ""
+    },
+    {
+      "name": "the worse game's moves kept",
+      "old": "bits, taken = control, []",
+      "new": "bits = control"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "an unfinished build can refute",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "unfinished never reported",
+      "old": "unfinished = not all(r[\"complete\"] for r in v[\"roots\"])",
+      "new": "unfinished = False"
+    },
+    {
+      "name": "ties go to the new build",
+      "old": "chosen, bits = choose(earlier_pieces + [(1, r) for r in v[\"roots\"] if r[\"complete\"]])",
+      "new": "chosen, bits = choose([(1, r) for r in v[\"roots\"] if r[\"complete\"]] + earlier_pieces)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-01T19:15:29+00:00",
+    "killed": 26,
+    "survived": [],
+    "killed_by": {
+      "positions fingerprint unchecked": [
+        "test_the_selection_needs_the_registered_positions_and_library"
+      ],
+      "library source unchecked": ["test_the_selection_needs_the_registered_positions_and_library"],
+      "a position with one winning move selected": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_root_the_builder_left_as_a_leaf_builds_no_move",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_no_saving_once_every_build_finished_refutes",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_earlier_assembly",
+        "test_the_selection_is_every_unbuilt_winning_move_at_heavy_positions_with_a_choice",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "the weight floor exclusive": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_root_the_builder_left_as_a_leaf_builds_no_move",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_no_saving_once_every_build_finished_refutes",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_earlier_assembly",
+        "test_the_selection_is_every_unbuilt_winning_move_at_heavy_positions_with_a_choice",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "no weight floor": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_root_the_builder_left_as_a_leaf_builds_no_move",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_no_saving_once_every_build_finished_refutes",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_earlier_assembly",
+        "test_the_selection_is_every_unbuilt_winning_move_at_heavy_positions_with_a_choice",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "built moves selected again": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_root_the_builder_left_as_a_leaf_builds_no_move",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_no_saving_once_every_build_finished_refutes",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_earlier_assembly",
+        "test_the_selection_is_every_unbuilt_winning_move_at_heavy_positions_with_a_choice",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "a root leaf counts as every move": ["test_a_root_the_builder_left_as_a_leaf_builds_no_move"],
+      "the run's integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "the earlier runs' integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "selection unchecked": ["test_moves_other_than_the_selection_s_are_not_run"],
+      "built moves unchecked": ["test_moves_other_than_the_selection_s_are_not_run"],
+      "root nodes unchecked": ["test_moves_other_than_the_selection_s_are_not_run"],
+      "earlier pieces unvalidated": ["test_pieces_off_the_library_are_not_run"],
+      "new pieces unvalidated": ["test_pieces_off_the_library_are_not_run"],
+      "unfinished pieces validated": [
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out"
+      ],
+      "control unchecked": ["test_an_earlier_assembly_other_than_registered_is_not_run"],
+      "an unfinished build is a candidate": [
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute",
+        "test_an_unfinished_build_off_the_library_is_only_left_out"
+      ],
+      "the new builds left out": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_the_bars_are_inclusive",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "taken counts earlier builds": [
+        "test_a_build_s_new_library_maps_are_paid_once",
+        "test_a_tie_keeps_the_earlier_build",
+        "test_an_unfinished_build_off_the_library_is_only_left_out",
+        "test_no_saving_once_every_build_finished_refutes",
+        "test_the_whole_game_takes_the_cheapest_builds_and_is_judged_against_the_earlier_assembly"
+      ],
+      "the worse game kept": ["test_the_game_is_never_worse_than_the_earlier_assembly"],
+      "the worse game's moves kept": ["test_the_game_is_never_worse_than_the_earlier_assembly"],
+      "support bar exclusive": ["test_the_bars_are_inclusive"],
+      "refute bar exclusive": ["test_the_bars_are_inclusive"],
+      "an unfinished build can refute": [
+        "test_an_unfinished_build_is_never_taken_and_cannot_refute"
+      ],
+      "unfinished never reported": ["test_an_unfinished_build_is_never_taken_and_cannot_refute"],
+      "ties go to the new build": ["test_a_tie_keeps_the_earlier_build"]
+    }
+  }
+}

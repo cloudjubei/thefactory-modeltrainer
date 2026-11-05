@@ -1,0 +1,121 @@
+{
+  "file": "harness/floor_x1.py",
+  "tests": ["tests/test_floor_x1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "other g3 bits",
+      "old": "\"g3_bits\": 280_640",
+      "new": "\"g3_bits\": 280_641"
+    },
+    {
+      "name": "maps bar lowered",
+      "old": "\"maps_support\": (1, 20)",
+      "new": "\"maps_support\": (1, 25)"
+    },
+    {
+      "name": "maps refute raised",
+      "old": "\"maps_refute\": (1, 100)",
+      "new": "\"maps_refute\": (1, 50)"
+    },
+    {
+      "name": "roots bar lowered",
+      "old": "\"roots_support\": (1, 10)",
+      "new": "\"roots_support\": (1, 20)"
+    },
+    {
+      "name": "roots refute raised",
+      "old": "\"roots_refute\": (1, 50)}",
+      "new": "\"roots_refute\": (1, 25)}"
+    },
+    {
+      "name": "any g3 bits judged",
+      "old": "    if e[\"g3_bits\"] != spec[\"g3_bits\"] or not e[\"symmetry_checked\"]:",
+      "new": "    if not e[\"symmetry_checked\"]:"
+    },
+    {
+      "name": "an unchecked symmetry judged",
+      "old": "    if e[\"g3_bits\"] != spec[\"g3_bits\"] or not e[\"symmetry_checked\"]:",
+      "new": "    if e[\"g3_bits\"] != spec[\"g3_bits\"]:"
+    },
+    {
+      "name": "saved counted the wrong way",
+      "old": "    saved = g3 - price",
+      "new": "    saved = price - g3"
+    },
+    {
+      "name": "support strict",
+      "old": "\"supported\" if sd * saved >= sn * g3",
+      "new": "\"supported\" if sd * saved > sn * g3"
+    },
+    {
+      "name": "refute strict",
+      "old": "\"refuted\" if rd * saved <= rn * g3",
+      "new": "\"refuted\" if rd * saved < rn * g3"
+    },
+    {
+      "name": "maps judged as roots",
+      "old": "    return _judged(e, spec, \"maps\")",
+      "new": "    return _judged(e, spec, \"roots\")"
+    },
+    {
+      "name": "roots judged as maps",
+      "old": "    return _judged(e, spec, \"roots\")",
+      "new": "    return _judged(e, spec, \"maps\")"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-29T23:04:19+00:00",
+    "killed": 12,
+    "survived": [],
+    "killed_by": {
+      "other g3 bits": [
+        "test_a_measurement_off_g3_or_without_the_symmetry_checked_is_not_judged",
+        "test_the_bars_are_g3_s_registered_bits",
+        "test_x1_prices_mirror_sharing_against_g3"
+      ],
+      "maps bar lowered": [
+        "test_maps_shared_by_mirror_are_judged_on_the_share_saved",
+        "test_x1_prices_mirror_sharing_against_g3"
+      ],
+      "maps refute raised": [
+        "test_maps_shared_by_mirror_are_judged_on_the_share_saved",
+        "test_x1_prices_mirror_sharing_against_g3"
+      ],
+      "roots bar lowered": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_the_bars_are_g3_s_registered_bits",
+        "test_x1_prices_mirror_sharing_against_g3"
+      ],
+      "roots refute raised": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_x1_prices_mirror_sharing_against_g3"
+      ],
+      "any g3 bits judged": [
+        "test_a_measurement_off_g3_or_without_the_symmetry_checked_is_not_judged"
+      ],
+      "an unchecked symmetry judged": [
+        "test_a_measurement_off_g3_or_without_the_symmetry_checked_is_not_judged"
+      ],
+      "saved counted the wrong way": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_maps_shared_by_mirror_are_judged_on_the_share_saved",
+        "test_the_bars_are_g3_s_registered_bits"
+      ],
+      "support strict": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_maps_shared_by_mirror_are_judged_on_the_share_saved",
+        "test_the_bars_are_g3_s_registered_bits"
+      ],
+      "refute strict": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_maps_shared_by_mirror_are_judged_on_the_share_saved"
+      ],
+      "maps judged as roots": ["test_maps_shared_by_mirror_are_judged_on_the_share_saved"],
+      "roots judged as maps": [
+        "test_frontier_positions_played_mirrored_are_judged_on_the_share_saved",
+        "test_the_bars_are_g3_s_registered_bits"
+      ]
+    }
+  }
+}

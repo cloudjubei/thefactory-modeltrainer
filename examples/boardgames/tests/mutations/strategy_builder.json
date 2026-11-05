@@ -55,13 +55,13 @@
     },
     {
       "name": "node bit dropped",
-      "old": "        return {\"nodes\": len(self.nodes) + moves * move_bits",
-      "new": "        return {\"nodes\": moves * move_bits"
+      "old": "        nodes = len(self.nodes) + moves * move_bits",
+      "new": "        nodes = moves * move_bits"
     },
     {
       "name": "leaf reference free",
-      "old": "        ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0",
-      "new": "        ref = 0"
+      "old": "            return leaves * (math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0)",
+      "new": "            return 0"
     },
     {
       "name": "check skips opponent replies",
@@ -190,8 +190,8 @@
     },
     {
       "name": "map bits dropped",
-      "old": "+ leaves * ref + maps + exc_bits,",
-      "new": "+ leaves * ref + exc_bits,"
+      "old": "self._references(leaves) + maps + exc_bits",
+      "new": "self._references(leaves) + exc_bits"
     },
     {
       "name": "library ignored",
@@ -501,14 +501,83 @@
       "name": "search starts without its second phase",
       "old": "        start = restrict(self.maps[-1], empty)",
       "new": "        start = {c: k for c, k in self.maps[-1].items() if c >= 0 and c in set(empty)}"
+    },
+    {
+      "name": "an unknown code accepted",
+      "old": "        if refs not in CODES:",
+      "new": "        if False:"
+    },
+    {
+      "name": "first_use counted as fixed",
+      "old": "        if self.refs == \"fixed\":",
+      "new": "        if True:"
+    },
+    {
+      "name": "the root is the last state built",
+      "old": "        if depth == 0:\n            self.root = state",
+      "new": "        if True:\n            self.root = state"
+    },
+    {
+      "name": "an unbuilt position refused",
+      "old": "        return {\"leaf\": None}",
+      "new": "        raise KeyError(key)"
+    },
+    {
+      "name": "an unbuilt position plays the empty map",
+      "old": "if x is not None]",
+      "new": "if True]"
+    },
+    {
+      "name": "unplayed own maps referenced",
+      "old": "    return code_bits(\"first_use\", [played.get(x, x) for x in refs], own + len(played), shared)",
+      "new": "    return code_bits(\"first_use\", refs, max(refs, default=0) + 1, shared)"
+    },
+    {
+      "name": "library read as own maps",
+      "old": "    own = 1 + shared\n    played = {",
+      "new": "    own = 1\n    played = {"
+    },
+    {
+      "name": "root move not played",
+      "old": "            moves = [self.root_move]\n",
+      "new": "            moves = moves\n"
+    },
+    {
+      "name": "root left to a leaf",
+      "old": "        if depth == 0 and self.root_move is not None:\n            return self._split(state, depth)\n",
+      "new": ""
+    },
+    {
+      "name": "a losing root move accepted",
+      "old": "            if self.root_move not in moves:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "root move forced below the root",
+      "old": "        if depth == 0 and self.root_move is not None:\n            if self.root_move not in moves:",
+      "new": "        if self.root_move in moves:\n            if self.root_move not in moves:"
+    },
+    {
+      "name": "every position split under a root move",
+      "old": "        if depth == 0 and self.root_move is not None:\n            return self._split(state, depth)\n",
+      "new": "        if self.root_move is not None:\n            return self._split(state, depth)\n"
+    },
+    {
+      "name": "root move dropped",
+      "old": "        self.root_move = root_move\n",
+      "new": "        self.root_move = None\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-21T08:51:51+00:00",
-    "killed": 95,
+    "at": "2026-11-01T09:09:03+00:00",
+    "killed": 108,
     "survived": [],
     "killed_by": {
       "empty map not tried first": [
+        "test_a_position_below_the_root_where_the_root_move_wins_is_still_the_rule_s",
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_the_builder_s_covering_and_simplify_use_its_verifier",
@@ -519,18 +588,27 @@
         "test_a_known_map_covers_a_position_without_searching",
         "test_a_library_map_covers_a_position_with_both_its_phases",
         "test_a_library_map_covers_a_position_without_searching",
+        "test_by_first_use_library_references_name_the_library_maps_played",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are"
       ],
       "search before reuse": [
         "test_a_known_map_covers_a_position_without_searching",
         "test_a_library_map_covers_a_position_with_both_its_phases",
         "test_a_library_map_covers_a_position_without_searching",
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_library_references_name_the_library_maps_played",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_the_builder_s_covering_and_simplify_use_its_verifier"
       ],
       "search below the minimum depth": [
+        "test_a_position_below_the_root_where_the_root_move_wins_is_still_the_rule_s",
+        "test_below_the_root_the_rule_chooses_as_without_a_root_move",
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
         "test_moves_are_chosen_to_make_the_most_children_ready",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
@@ -548,10 +626,18 @@
       "deadline ignored": ["test_the_deadline_stops_the_build"],
       "unwinnable root not refused": ["test_a_root_its_side_cannot_win_is_refused"],
       "move chosen without readiness": [
+        "test_a_position_below_the_root_where_the_root_move_wins_is_still_the_rule_s",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one"
       ],
       "only first child built": [
+        "test_a_root_move_is_played_at_the_root_in_place_of_the_rule_s",
+        "test_a_root_move_makes_the_root_a_move_where_it_would_be_a_leaf",
         "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_below_the_root_the_rule_chooses_as_without_a_root_move",
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
@@ -563,6 +649,11 @@
       ],
       "node bit dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_library_references_name_the_library_maps_played",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
@@ -576,6 +667,7 @@
       ],
       "leaf reference free": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
@@ -600,6 +692,7 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
@@ -629,6 +722,7 @@
       "threshold boundary": ["test_a_leaf_exactly_at_the_threshold_is_kept"],
       "leaf map dropped": [
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
@@ -646,10 +740,12 @@
       ],
       "check ignores exceptions": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_check_plays_a_leaf_s_exceptions"
       ],
       "own positions ignore exceptions": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_check_plays_a_leaf_s_exceptions"
       ],
       "leaf map bits not charged": ["test_the_threshold_counts_the_leaf_s_map_bits"],
@@ -658,6 +754,7 @@
         "test_the_threshold_counts_the_leaf_s_map_bits"
       ],
       "no flag bit per leaf": [
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
         "test_improving_keeps_a_leaf_smaller_than_its_split",
@@ -666,6 +763,7 @@
         "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "exception code dropped": [
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
@@ -677,6 +775,7 @@
       ],
       "code not stored": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
@@ -691,6 +790,7 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
@@ -736,6 +836,10 @@
       "negative time given": ["test_a_build_past_its_deadline_gives_a_search_no_time"],
       "map bits dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
@@ -745,12 +849,16 @@
       "library ignored": [
         "test_a_library_map_covers_a_position_with_both_its_phases",
         "test_a_library_map_covers_a_position_without_searching",
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_library_references_name_the_library_maps_played",
         "test_dropping_unused_maps_keeps_the_library_s",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library",
         "test_with_phases_every_map_the_build_pays_for_carries_a_flag_bit"
       ],
       "library charged": [
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_library_references_name_the_library_maps_played",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library",
         "test_with_phases_every_map_the_build_pays_for_carries_a_flag_bit"
@@ -760,6 +868,8 @@
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
       ],
       "library size forgotten": [
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_library_references_name_the_library_maps_played",
         "test_dropping_unused_maps_keeps_the_library_s",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library",
@@ -797,6 +907,7 @@
         "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
       ],
       "split always wins": [
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
         "test_by_size_a_tie_keeps_the_leaf"
@@ -811,6 +922,7 @@
         "test_the_leaves_a_kept_split_makes_join_the_queue"
       ],
       "split's nodes not undone": [
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
@@ -822,6 +934,7 @@
         "test_by_size_a_winning_split_keeps_the_maps_it_found"
       ],
       "leaf's map seen by the split": [
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
       ],
@@ -934,6 +1047,10 @@
       "research leaf tried again": ["timeout after 300s"],
       "phases always on": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it",
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code",
         "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library",
         "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
@@ -946,6 +1063,49 @@
       "check drops second phases": ["test_check_plays_a_leaf_s_second_phase"],
       "search starts without its second phase": [
         "test_the_search_starts_from_the_most_recent_map_with_both_phases_on_the_cells_still_empty"
+      ],
+      "an unknown code accepted": ["test_an_unknown_reference_code_is_refused"],
+      "first_use counted as fixed": [
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference",
+        "test_by_first_use_library_references_name_the_library_maps_played",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code"
+      ],
+      "the root is the last state built": [
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has",
+        "test_by_first_use_the_builder_counts_references_as_the_judges_do",
+        "test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code"
+      ],
+      "an unbuilt position refused": [
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has"
+      ],
+      "an unbuilt position plays the empty map": [
+        "test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has"
+      ],
+      "unplayed own maps referenced": [
+        "test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference"
+      ],
+      "library read as own maps": [
+        "test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it"
+      ],
+      "root move not played": [
+        "test_a_root_move_is_played_at_the_root_in_place_of_the_rule_s",
+        "test_below_the_root_the_rule_chooses_as_without_a_root_move"
+      ],
+      "root left to a leaf": ["test_a_root_move_makes_the_root_a_move_where_it_would_be_a_leaf"],
+      "a losing root move accepted": ["test_a_root_move_that_does_not_win_is_refused"],
+      "root move forced below the root": [
+        "test_a_position_below_the_root_where_the_root_move_wins_is_still_the_rule_s",
+        "test_a_root_move_that_does_not_win_is_refused"
+      ],
+      "every position split under a root move": [
+        "test_below_the_root_the_rule_chooses_as_without_a_root_move"
+      ],
+      "root move dropped": [
+        "test_a_root_move_is_played_at_the_root_in_place_of_the_rule_s",
+        "test_a_root_move_makes_the_root_a_move_where_it_would_be_a_leaf",
+        "test_a_root_move_that_does_not_win_is_refused",
+        "test_below_the_root_the_rule_chooses_as_without_a_root_move"
       ]
     }
   }

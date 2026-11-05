@@ -1,0 +1,222 @@
+{
+  "file": "harness/floor_u1.py",
+  "tests": ["tests/test_floor_u1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "no group moves",
+      "old": "            moves |= {group for group in (frozenset(playing - held), frozenset(playing & held)) if len(group) > 1}\n",
+      "new": ""
+    },
+    {
+      "name": "no group in",
+      "old": "(frozenset(playing - held), frozenset(playing & held))",
+      "new": "(frozenset(playing & held),)"
+    },
+    {
+      "name": "no group out",
+      "old": "(frozenset(playing - held), frozenset(playing & held))",
+      "new": "(frozenset(playing - held),)"
+    },
+    {
+      "name": "pairs are no group",
+      "old": "if len(group) > 1}",
+      "new": "if len(group) > 2}"
+    },
+    {
+      "name": "the worst move taken",
+      "old": "trial = min(((size(held ^ move)",
+      "new": "trial = max(((size(held ^ move)"
+    },
+    {
+      "name": "a tie moves",
+      "old": "if trial[0] >= best:",
+      "new": "if trial[0] > best or trial[0] == best and held:"
+    },
+    {
+      "name": "a rebuild never goes in alone",
+      "old": "moves = {frozenset({k}) for k in plays}",
+      "new": "moves = {frozenset({k}) for k in plays if k in held}"
+    },
+    {
+      "name": "a rebuild never goes out alone",
+      "old": "moves = {frozenset({k}) for k in plays}",
+      "new": "moves = {frozenset({k}) for k in plays if k not in held}"
+    },
+    {
+      "name": "G4's not_run passed over",
+      "old": "if g4[\"verdict\"] == \"not_run\":",
+      "new": "if False:"
+    },
+    {
+      "name": "unfinished rebuilds kept",
+      "old": "for r in e[\"roots\"] if r[\"complete\"]}",
+      "new": "for r in e[\"roots\"]}"
+    },
+    {
+      "name": "the search sees no rebuild",
+      "old": "        base = {**assembly[\"base\"], **{k: rebuilds[k] for k in held}}\n        return",
+      "new": "        base = dict(assembly[\"base\"])\n        return"
+    },
+    {
+      "name": "the game takes no rebuild",
+      "old": "    base = {**assembly[\"base\"], **{k: rebuilds[k] for k in held}}\n    chosen",
+      "new": "    base = dict(assembly[\"base\"])\n    chosen"
+    },
+    {
+      "name": "only the start from none",
+      "old": "u1_choose(size, plays, frozenset(rebuilds))]",
+      "new": "u1_choose(size, plays, frozenset())]"
+    },
+    {
+      "name": "only the start from all",
+      "old": "starts = [u1_choose(size, plays, frozenset()),",
+      "new": "starts = [u1_choose(size, plays, frozenset(rebuilds)),"
+    },
+    {
+      "name": "the first start kept",
+      "old": "held, _ = min(starts, key=lambda s: s[1])",
+      "new": "held, _ = starts[0]"
+    },
+    {
+      "name": "the last start kept",
+      "old": "held, _ = min(starts, key=lambda s: s[1])",
+      "new": "held, _ = starts[1]"
+    },
+    {
+      "name": "every held rebuild counted",
+      "old": "kept = len(held & kids)",
+      "new": "kept = len(held)"
+    },
+    {
+      "name": "worse than G4 allowed",
+      "old": "if bits > g4[\"bits\"]:",
+      "new": "if False:"
+    },
+    {
+      "name": "G4's count not taken with its game",
+      "old": "bits, kept = g4[\"bits\"], g4[\"rebuilt\"]",
+      "new": "bits = g4[\"bits\"]"
+    },
+    {
+      "name": "starts reported swapped",
+      "old": "\"from_none\": starts[0][1],",
+      "new": "\"from_none\": starts[1][1],"
+    },
+    {
+      "name": "new maps priced as G3's",
+      "old": "for i, (m, empty) in enumerate(library, 1) if i > len(assembly[\"library\"])}}",
+      "new": "for i, (m, empty) in enumerate(library, 1) if i > len(library)}}"
+    },
+    {
+      "name": "the search's ply-6 choice not kept",
+      "old": "    if size(held) < bits:\n        chosen, bits = before, size(held)\n",
+      "new": ""
+    },
+    {
+      "name": "the search's ply-6 choice kept on a tie",
+      "old": "if size(held) < bits:",
+      "new": "if size(held) <= bits:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-03T23:53:47+00:00",
+    "killed": 23,
+    "survived": [],
+    "killed_by": {
+      "no group moves": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_the_rebuilds_sharing_a_map_go_in_together",
+        "test_the_rebuilds_sharing_a_map_go_out_together",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "no group in": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_the_rebuilds_sharing_a_map_go_in_together"
+      ],
+      "no group out": [
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_the_rebuilds_sharing_a_map_go_out_together",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "pairs are no group": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_the_rebuilds_sharing_a_map_go_out_together",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "the worst move taken": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_a_single_rebuild_goes_in_or_out_while_it_shrinks_the_game",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_best_move_is_taken_first_and_ties_change_nothing",
+        "test_the_ply_6_builds_chosen_again_only_where_that_shrinks_the_game",
+        "test_the_rebuilds_sharing_a_map_go_in_together",
+        "test_the_rebuilds_sharing_a_map_go_out_together",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "a tie moves": ["test_the_best_move_is_taken_first_and_ties_change_nothing"],
+      "a rebuild never goes in alone": [
+        "test_a_map_played_by_one_rebuild_is_no_group_move",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_a_single_rebuild_goes_in_or_out_while_it_shrinks_the_game",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_best_move_is_taken_first_and_ties_change_nothing",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "a rebuild never goes out alone": [
+        "test_a_single_rebuild_goes_in_or_out_while_it_shrinks_the_game"
+      ],
+      "G4's not_run passed over": ["test_a_run_g4_does_not_judge_is_not_run"],
+      "unfinished rebuilds kept": ["test_an_unfinished_rebuild_stays_g3_s"],
+      "the search sees no rebuild": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_ply_6_builds_chosen_again_only_where_that_shrinks_the_game",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "the game takes no rebuild": ["test_only_rebuilds_below_positions_keeping_g3_s_pieces_count"],
+      "only the start from none": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "only the start from all": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "the first start kept": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "the last start kept": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "every held rebuild counted": [
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count"
+      ],
+      "worse than G4 allowed": ["test_the_game_is_never_worse_than_g4_s"],
+      "G4's count not taken with its game": ["test_the_game_is_never_worse_than_g4_s"],
+      "starts reported swapped": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "new maps priced as G3's": [
+        "test_a_rebuild_pair_comes_in_together",
+        "test_a_rebuild_pair_g4_keeps_because_neither_goes_back_alone_goes_back_together",
+        "test_an_unfinished_rebuild_stays_g3_s",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_ply_6_builds_chosen_again_only_where_that_shrinks_the_game",
+        "test_the_smaller_of_the_two_starts_is_kept",
+        "test_the_whole_game_from_the_better_start_with_the_ply_6_builds_chosen_again"
+      ],
+      "the search's ply-6 choice not kept": [
+        "test_the_ply_6_builds_chosen_again_only_where_that_shrinks_the_game"
+      ],
+      "the search's ply-6 choice kept on a tie": [
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count"
+      ]
+    }
+  }
+}

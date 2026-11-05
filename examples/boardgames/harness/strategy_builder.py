@@ -18,7 +18,12 @@ one bit per node (move or leaf), three bits per table move, a leaf's reference i
 (harness.steady_state.map_bits over the cells empty where it was found; with `phases`, a flag bit each for whether a
 second phase follows — the search may then switch one on) and, once any leaf carries exceptions, a flag
 bit per leaf plus each such leaf's exceptions coded in walk order (harness.exception_coding: flags only where the
-rules leave a choice, h183).
+rules leave a choice, h183). `refs` names the references' code (harness.reference_coding): "fixed", the index's full
+width over the whole map list, or "first_use", as the judges code a finished build since h312 — the leaves read in the
+decoder's order from the root (the state built at depth 0), positions not built yet skipped, and own maps no leaf
+plays paying their bits but no reference — so every choice by size is made in the code the strategy is judged in.
+A `root_move` makes the root a move node playing that move (it must win) in place of a leaf or the rule's choice, to
+build the strategy under each winning move of a position; below the root the rule chooses as ever.
 
 `search(state, start, seconds)` returns None (nothing found) or {"levels", "exceptions" (empty for a map that wins
 every line), "own_positions" (the leaf's own positions; needed only with exceptions)}. `seconds` is the search's
@@ -35,6 +40,7 @@ import math
 import time
 
 from harness.exception_coding import walk_order_cost
+from harness.reference_coding import CODES, code_bits, walk_leaves
 from harness.steady_exceptions import choose_with, verify_with
 from harness.steady_state import Facts, map_bits, restrict, simplify, verify
 
@@ -43,12 +49,17 @@ class Builder:
     def __init__(self, facts: Facts, winning, search, n_levels: int, level_bits: int, cap: int,
                  min_leaf_depth: int, reuse_window: int, seconds: float, accept: float | None = None,
                  budgets: list | None = None, library: list | None = None, verifier=verify,
-                 choose_by_size: bool = False, phases: bool = False):
+                 choose_by_size: bool = False, phases: bool = False, refs: str = "fixed",
+                 root_move: int | None = None):
+        if refs not in CODES:
+            raise ValueError(f"unknown reference code {refs!r}; one of {CODES}")
         self.facts, self.game = facts, facts.game
+        self.refs, self.root = refs, None
         self.winning, self.search = winning, search
         self.n_levels, self.level_bits, self.cap = n_levels, level_bits, cap
         self.min_leaf_depth, self.reuse_window, self.accept = min_leaf_depth, reuse_window, accept
         self.verifier, self.choose_by_size, self.phases = verifier, choose_by_size, phases
+        self.root_move = root_move
         self.budgets = sorted(budgets or [])
         self.deadline = time.monotonic() + seconds
         self.shared = len(library or [])
@@ -143,10 +154,14 @@ class Builder:
     def build(self, state, depth: int = 0) -> bool:
         """Fill `nodes` for the strategy from `state`; False when the deadline passes first."""
         key = self.game.state_key(state)
+        if depth == 0:
+            self.root = state
         if key in self.nodes:
             return True
         if time.monotonic() > self.deadline:
             return False
+        if depth == 0 and self.root_move is not None:
+            return self._split(state, depth)
         leaf = self._leaf(state, depth)
         if leaf is not None and "levels" in leaf and self.choose_by_size:
             return self._smaller(state, depth, leaf)
@@ -161,6 +176,10 @@ class Builder:
         moves = sorted(self.winning([state])[0])
         if not moves:
             raise ValueError("the build reached a position its side cannot win — the oracle or the root is wrong")
+        if depth == 0 and self.root_move is not None:
+            if self.root_move not in moves:
+                raise ValueError(f"the root move {self.root_move} does not win; the winning moves are {moves}")
+            moves = [self.root_move]
         scored = []
         for a in moves:
             children = self._children(state, a)
@@ -263,22 +282,42 @@ class Builder:
     def bits(self) -> dict:
         moves = sum(1 for n in self.nodes.values() if "move" in n)
         leaves = len(self.nodes) - moves
-        ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0
         own = 1 + self.shared
         maps = (sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[own:], self.map_empty[own:]))
                 + (len(self.maps) - own if self.phases else 0))
         move_bits = math.ceil(math.log2(self.game.num_actions))
         excepted = [n for n in self.nodes.values() if n.get("exceptions")]
         exc_bits = leaves + sum(n["coded"] for n in excepted) if excepted else 0
-        return {"nodes": len(self.nodes) + moves * move_bits + leaves * ref + maps + exc_bits, "moves": moves,
-                "leaves": leaves, "maps": len(self.maps) - own, "map_bits": maps,
+        nodes = len(self.nodes) + moves * move_bits + self._references(leaves) + maps + exc_bits
+        return {"nodes": nodes, "moves": moves, "leaves": leaves, "maps": len(self.maps) - own, "map_bits": maps,
                 "exceptions": sum(len(n["exceptions"]) for n in excepted), "exception_bits": exc_bits}
 
+
+    def _references(self, leaves: int) -> int:
+        if self.refs == "fixed":
+            return leaves * (math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0)
+        return first_use_references(self.game, self.root, self.nodes, self.shared)
 
     def found_maps(self) -> list:
         """The maps this build added, as (levels, cells empty where found) — the next build's library."""
         own = 1 + self.shared
         return list(zip(self.maps[own:], self.map_empty[own:]))
+
+
+def first_use_references(game, root, nodes: dict, shared: int) -> int:
+    """The bits a builder counting by first_use charges a strategy's references (harness.reference_coding): the leaves
+    read in the decoder's order from `root`, positions not built yet skipped, own maps no leaf plays taking none."""
+    refs = [x for x in walk_leaves(game, root, _Built(nodes)) if x is not None]
+    own = 1 + shared
+    played = {x: own + i for i, x in enumerate(sorted({x for x in refs if x >= own}))}
+    return code_bits("first_use", [played.get(x, x) for x in refs], own + len(played), shared)
+
+
+class _Built(dict):
+    """A strategy's nodes, a position not built yet read as a leaf playing no map."""
+
+    def __missing__(self, key):
+        return {"leaf": None}
 
 
 def check(facts: Facts, root, nodes: dict, maps: list, n_levels: int, cap: int) -> dict:

@@ -1,0 +1,247 @@
+{
+  "file": "harness/floor_g4.py",
+  "tests": ["tests/test_floor_g4.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "own integrity unchecked",
+      "old": "if _integrity(e, spec) or any(",
+      "new": "if any("
+    },
+    {
+      "name": "earlier integrity unchecked",
+      "old": " or any(_integrity(run, s) for run, s in earlier):",
+      "new": ":"
+    },
+    {
+      "name": "earlier rows' positions unchecked",
+      "old": "    if any(rank.get(_key(r)) != r[\"index\"] for r in rows):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "earlier rows' library unchecked",
+      "old": "    if not all(j1_valid(r, assembly[\"library\"]) for r in rows):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "control unchecked",
+      "old": "if control != spec[\"control_bits\"] or g4_selected",
+      "new": "if g4_selected"
+    },
+    {
+      "name": "selection unchecked",
+      "old": " or g4_selected(earlier, g3, assembly) != (spec[\"indices\"], spec[\"taken\"]):",
+      "new": ":"
+    },
+    {
+      "name": "taken builds unchecked",
+      "old": "g4_selected(earlier, g3, assembly) != (spec[\"indices\"], spec[\"taken\"])",
+      "new": "g4_selected(earlier, g3, assembly)[0] != spec[\"indices\"]"
+    },
+    {
+      "name": "rebuilt positions unchecked",
+      "old": "if sorted(r[\"index\"] for r in e[\"roots\"]) != spec[\"indices\"] or any(",
+      "new": "if any("
+    },
+    {
+      "name": "rebuilt boards unchecked",
+      "old": " or any(_key(r) != at[r[\"index\"]] for r in e[\"roots\"]):",
+      "new": ":"
+    },
+    {
+      "name": "rebuilds' library unchecked",
+      "old": "    if not all(j1_valid(r, library) for r in done):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "library without the kept strategies' maps",
+      "old": "[m for i in spec[\"indices\"] for m in own[i]]",
+      "new": "[]"
+    },
+    {
+      "name": "library from every G3 strategy",
+      "old": "for i in spec[\"indices\"] for m in own[i]",
+      "new": "for i in sorted(own) for m in own[i]"
+    },
+    {
+      "name": "library without the builds' maps",
+      "old": "\n            + [m for label in spec[\"taken\"] for m in built[tuple(label)]])",
+      "new": ")"
+    },
+    {
+      "name": "builds' maps first",
+      "old": "return ([*library] + [m for i in spec[\"indices\"] for m in own[i]]\n            + [m for label in spec[\"taken\"] for m in built[tuple(label)]])",
+      "new": "return ([*library] + [m for label in spec[\"taken\"] for m in built[tuple(label)]]\n            + [m for i in spec[\"indices\"] for m in own[i]])"
+    },
+    {
+      "name": "rebuilds read against G3's library",
+      "old": "_key(r): j1_piece(r, library) for r in done",
+      "new": "_key(r): j1_piece(r, assembly[\"library\"]) for r in done"
+    },
+    {
+      "name": "unfinished rebuilds taken",
+      "old": "done = [r for r in e[\"roots\"] if r[\"complete\"]]",
+      "new": "done = list(e[\"roots\"])"
+    },
+    {
+      "name": "no going back",
+      "old": "        if trial[0] >= best:\n            break",
+      "new": "        break"
+    },
+    {
+      "name": "going back on a tie",
+      "old": "        if trial[0] >= best:\n            break",
+      "new": "        if trial[0] > best:\n            break"
+    },
+    {
+      "name": "one going back only",
+      "old": "        held.discard(trial[1])\n",
+      "new": "        held.discard(trial[1])\n        break\n"
+    },
+    {
+      "name": "ply-6 builds not chosen again",
+      "old": "    chosen, bits = v2_assemble(rows, {**assembly, \"base\": base, \"map_cost\": cost})",
+      "new": "    chosen, bits = before, size(base)"
+    },
+    {
+      "name": "every rebuild counted",
+      "old": "taken = len(held & kids)",
+      "new": "taken = len(held)"
+    },
+    {
+      "name": "worse than the control kept",
+      "old": "    if bits > control:\n        bits, taken = control, 0\n",
+      "new": ""
+    },
+    {
+      "name": "an unfinished run refutes",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "\"supported\" if den * bits <= num * control",
+      "new": "\"supported\" if den * bits < num * control"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-03T13:43:10+00:00",
+    "killed": 25,
+    "survived": [],
+    "killed_by": {
+      "own integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "earlier integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "earlier rows' positions unchecked": [
+        "test_a_row_at_another_position_than_its_index_is_not_run"
+      ],
+      "earlier rows' library unchecked": [
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished"
+      ],
+      "control unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "selection unchecked": ["test_positions_or_builds_other_than_the_selection_s_are_not_run"],
+      "taken builds unchecked": ["test_positions_or_builds_other_than_the_selection_s_are_not_run"],
+      "rebuilt positions unchecked": [
+        "test_positions_or_builds_other_than_the_selection_s_are_not_run"
+      ],
+      "rebuilt boards unchecked": ["test_a_row_at_another_position_than_its_index_is_not_run"],
+      "rebuilds' library unchecked": [
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished"
+      ],
+      "library without the kept strategies' maps": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_a_rebuilt_strategy_s_new_map_paid_once_however_many_play_it",
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_library_is_g3_s_then_the_kept_strategies_own_maps_then_the_taken_builds",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "library from every G3 strategy": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_a_rebuilt_strategy_s_new_map_paid_once_however_many_play_it",
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_library_is_g3_s_then_the_kept_strategies_own_maps_then_the_taken_builds",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "library without the builds' maps": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_a_rebuilt_strategy_s_new_map_paid_once_however_many_play_it",
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_library_is_g3_s_then_the_kept_strategies_own_maps_then_the_taken_builds",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "builds' maps first": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_a_rebuilt_strategy_s_new_map_paid_once_however_many_play_it",
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_library_is_g3_s_then_the_kept_strategies_own_maps_then_the_taken_builds",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "rebuilds read against G3's library": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_a_rebuilt_strategy_s_new_map_paid_once_however_many_play_it",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back",
+        "test_the_bars_are_inclusive",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "unfinished rebuilds taken": [
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished"
+      ],
+      "no going back": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_every_rebuild_that_alone_grows_the_game_goes_back"
+      ],
+      "going back on a tie": [
+        "test_a_rebuild_that_grows_the_game_keeps_g3_s_strategy",
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute",
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_rebuilds_off_the_library_are_not_run_unless_unfinished",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds",
+        "test_the_rebuilt_strategies_and_their_shared_maps_are_paid_once"
+      ],
+      "one going back only": ["test_every_rebuild_that_alone_grows_the_game_goes_back"],
+      "ply-6 builds not chosen again": [
+        "test_only_rebuilds_below_positions_keeping_g3_s_pieces_count",
+        "test_the_game_is_never_worse_than_the_assembled_one",
+        "test_the_ply_6_builds_are_chosen_again_with_the_rebuilds"
+      ],
+      "every rebuild counted": ["test_only_rebuilds_below_positions_keeping_g3_s_pieces_count"],
+      "worse than the control kept": ["test_the_game_is_never_worse_than_the_assembled_one"],
+      "an unfinished run refutes": [
+        "test_an_unfinished_rebuild_keeps_g3_s_strategy_and_cannot_refute"
+      ],
+      "support bar exclusive": ["test_the_bars_are_inclusive"],
+      "refute bar exclusive": ["test_the_bars_are_inclusive"]
+    }
+  }
+}

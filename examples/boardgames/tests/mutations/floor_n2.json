@@ -1,0 +1,66 @@
+{
+  "file": "harness/floor_n2.py",
+  "tests": ["tests/test_floor_n2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another fingerprint",
+      "old": "\"measurement_fp\": \"af5ea127269c\"",
+      "new": "\"measurement_fp\": \"98b7fb6ebf7f\""
+    },
+    {
+      "name": "tactics instead of the net",
+      "old": "\"order\": \"net\", \"net\": \"c49_n1.json.gz\"}",
+      "new": "\"order\": \"tactics\"}"
+    },
+    {
+      "name": "another net",
+      "old": "\"net\": \"c49_n1.json.gz\"}",
+      "new": "\"net\": \"c49_n0.json.gz\"}"
+    },
+    {
+      "name": "any gain supports",
+      "old": "\"support\": 0.9,",
+      "new": "\"support\": 1.0,"
+    },
+    {
+      "name": "other net bits",
+      "old": "\"net_bits\": 19_996}",
+      "new": "\"net_bits\": 20_000}"
+    },
+    {
+      "name": "judged against l5",
+      "old": "    return l4_size(e, control, spec, L6)",
+      "new": "    return l4_size(e, control, spec, L5)"
+    },
+    {
+      "name": "own completion judge",
+      "old": "n2_report = w6_report",
+      "new": "n2_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-29T07:45:39+00:00",
+    "killed": 7,
+    "survived": [],
+    "killed_by": {
+      "another fingerprint": [
+        "test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"
+      ],
+      "tactics instead of the net": [
+        "test_n2_is_judged_against_l6_under_l6_s_own_registration",
+        "test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"
+      ],
+      "another net": ["test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"],
+      "any gain supports": [
+        "test_n2_is_judged_against_l6_under_l6_s_own_registration",
+        "test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"
+      ],
+      "other net bits": ["test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"],
+      "judged against l5": ["test_n2_is_judged_against_l6_under_l6_s_own_registration"],
+      "own completion judge": [
+        "test_n2_is_l5_breaking_ties_by_n1_s_net_on_positions_the_net_never_saw"
+      ]
+    }
+  }
+}

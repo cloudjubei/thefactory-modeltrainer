@@ -1,0 +1,145 @@
+{
+  "file": "harness/floor_j2.py",
+  "tests": ["tests/test_floor_j2.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "no groups joined",
+      "old": "                parent[find(k)] = find(owner[c])",
+      "new": "                pass"
+    },
+    {
+      "name": "group cap exclusive",
+      "old": "if len(swappable) > max_swapped:",
+      "new": "if len(swappable) >= max_swapped:"
+    },
+    {
+      "name": "no group cap",
+      "old": "            raise ValueError(f\"a group has {len(swappable)} positions with builds, over {max_swapped}\")",
+      "new": "            pass"
+    },
+    {
+      "name": "the start ignored",
+      "old": "    chosen = dict(start)",
+      "new": "    chosen = {}"
+    },
+    {
+      "name": "groups gone over once",
+      "old": "                best, chosen, improved = trial_best, trial, True",
+      "new": "                best, chosen = trial_best, trial"
+    },
+    {
+      "name": "the new size not kept",
+      "old": "                best, chosen, improved = trial_best, trial, True",
+      "new": "                chosen, improved = trial, True"
+    },
+    {
+      "name": "other groups' choices dropped",
+      "old": "            rest = {k: label for k, label in chosen.items() if k not in swappable}",
+      "new": "            rest = {}"
+    },
+    {
+      "name": "built positions' maps not paid",
+      "old": ",\n                               *(pieces[k][label][1] for k, label in rest.items()))",
+      "new": ")"
+    },
+    {
+      "name": "kept positions' maps not paid",
+      "old": "            paid = set().union(*(base[c][1] for k in below if k not in swappable and k not in rest\n                                 for c in below[k] if c in base),\n",
+      "new": "            paid = set().union(\n"
+    },
+    {
+      "name": "the swapping positions' own maps paid",
+      "old": "for k in below if k not in swappable and k not in rest",
+      "new": "for k in below if k not in rest"
+    },
+    {
+      "name": "built positions' ply-8 maps paid",
+      "old": "for k in below if k not in swappable and k not in rest",
+      "new": "for k in below if k not in swappable"
+    },
+    {
+      "name": "maps ignored in the cheapest build",
+      "old": "key=lambda o: o[1][0] + sum(map_cost[i] for i in o[1][1] - paid))[0]",
+      "new": "key=lambda o: o[1][0])[0]"
+    },
+    {
+      "name": "paid maps charged again",
+      "old": "for i in o[1][1] - paid))[0]",
+      "new": "for i in o[1][1]))[0]"
+    },
+    {
+      "name": "the whole group never swaps",
+      "old": "for n in range(len(swappable) + 1):",
+      "new": "for n in range(len(swappable)):"
+    },
+    {
+      "name": "at most pairs",
+      "old": "for n in range(len(swappable) + 1):",
+      "new": "for n in range(min(3, len(swappable) + 1)):"
+    },
+    {
+      "name": "ties replace",
+      "old": "if bits < trial_best:",
+      "new": "if bits <= trial_best:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-02T15:36:04+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "no groups joined": [
+        "test_a_build_sharing_its_ply_8_positions_pays_only_with_its_whole_group",
+        "test_a_group_s_change_keeps_the_other_groups_choices",
+        "test_a_group_with_too_many_positions_with_builds_is_refused",
+        "test_positions_sharing_a_ply_8_position_form_a_group_transitively"
+      ],
+      "group cap exclusive": ["test_a_group_with_too_many_positions_with_builds_is_refused"],
+      "no group cap": ["test_a_group_with_too_many_positions_with_builds_is_refused"],
+      "the start ignored": ["test_the_start_stands_where_no_group_improves_on_it"],
+      "groups gone over once": ["test_groups_are_tried_again_while_any_improves"],
+      "the new size not kept": ["timeout after 60s"],
+      "other groups' choices dropped": [
+        "test_a_group_s_change_keeps_the_other_groups_choices",
+        "test_groups_are_tried_again_while_any_improves",
+        "test_maps_another_group_s_build_plays_are_paid",
+        "test_maps_only_the_swapping_positions_or_built_ones_would_play_are_not_paid"
+      ],
+      "built positions' maps not paid": ["test_maps_another_group_s_build_plays_are_paid"],
+      "kept positions' maps not paid": [
+        "test_a_swapped_position_takes_the_build_whose_maps_the_rest_already_pays"
+      ],
+      "the swapping positions' own maps paid": [
+        "test_maps_only_the_swapping_positions_or_built_ones_would_play_are_not_paid"
+      ],
+      "built positions' ply-8 maps paid": [
+        "test_maps_only_the_swapping_positions_or_built_ones_would_play_are_not_paid"
+      ],
+      "maps ignored in the cheapest build": [
+        "test_a_swapped_position_takes_the_build_whose_maps_the_rest_already_pays",
+        "test_maps_only_the_swapping_positions_or_built_ones_would_play_are_not_paid"
+      ],
+      "paid maps charged again": [
+        "test_a_swapped_position_takes_the_build_whose_maps_the_rest_already_pays",
+        "test_maps_another_group_s_build_plays_are_paid"
+      ],
+      "the whole group never swaps": [
+        "test_a_build_sharing_its_ply_8_positions_pays_only_with_its_whole_group",
+        "test_a_group_s_change_keeps_the_other_groups_choices",
+        "test_a_group_with_too_many_positions_with_builds_is_refused",
+        "test_a_swapped_position_takes_the_build_whose_maps_the_rest_already_pays",
+        "test_groups_are_tried_again_while_any_improves",
+        "test_maps_another_group_s_build_plays_are_paid",
+        "test_maps_only_the_swapping_positions_or_built_ones_would_play_are_not_paid",
+        "test_the_start_stands_where_no_group_improves_on_it"
+      ],
+      "at most pairs": [
+        "test_a_build_sharing_its_ply_8_positions_pays_only_with_its_whole_group",
+        "test_a_group_s_change_keeps_the_other_groups_choices",
+        "test_a_group_with_too_many_positions_with_builds_is_refused"
+      ],
+      "ties replace": ["timeout after 60s"]
+    }
+  }
+}

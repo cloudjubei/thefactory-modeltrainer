@@ -1,0 +1,220 @@
+{
+  "file": "harness/floor_j1.py",
+  "tests": ["tests/test_floor_j1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "kids of built positions kept",
+      "old": "kids = {c for k in kept for c in below[k]}",
+      "new": "kids = {c for k in below for c in below[k]}"
+    },
+    {
+      "name": "trivial positions free",
+      "old": "+ 4 * len(kept) + len(kids - roots)\n",
+      "new": "+ 4 * len(kept)\n"
+    },
+    {
+      "name": "a move for every position",
+      "old": "+ 4 * len(kept) +",
+      "new": "+ 4 * len(below) +"
+    },
+    {
+      "name": "opening moves at 3 bits",
+      "old": "opening[\"moves\"] * 4",
+      "new": "opening[\"moves\"] * 3"
+    },
+    {
+      "name": "opening trivial free",
+      "old": " + opening[\"trivial\"] + 4",
+      "new": " + 4"
+    },
+    {
+      "name": "base maps unpaid",
+      "old": "set().union(*(base[c][1] for c in roots), *(p[1] for p in built.values()))",
+      "new": "set().union(*(p[1] for p in built.values()))"
+    },
+    {
+      "name": "built maps unpaid",
+      "old": "set().union(*(base[c][1] for c in roots), *(p[1] for p in built.values()))",
+      "new": "set().union(*(base[c][1] for c in roots))"
+    },
+    {
+      "name": "built strategies free",
+      "old": "            + sum(base[c][0] for c in roots) + sum(p[0] for p in built.values())",
+      "new": "            + sum(base[c][0] for c in roots)"
+    },
+    {
+      "name": "base strategies free",
+      "old": "            + sum(base[c][0] for c in roots) + sum(p[0] for p in built.values())",
+      "new": "            + sum(p[0] for p in built.values())"
+    },
+    {
+      "name": "maps free",
+      "old": "+ sum(map_cost[i] for i in played))",
+      "new": "+ 0)"
+    },
+    {
+      "name": "the empty map read as a library map",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library))",
+      "new": "if 0 <= n.get(\"leaf\", 0) <= len(library))"
+    },
+    {
+      "name": "own maps read as library maps",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library))",
+      "new": "if 1 <= n.get(\"leaf\", 0))"
+    },
+    {
+      "name": "the last library map missed",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library))",
+      "new": "if 1 <= n.get(\"leaf\", 0) < len(library))"
+    },
+    {
+      "name": "unfinished accepted",
+      "old": "bool(r[\"complete\"] and r[\"checked\"]",
+      "new": "bool(r[\"checked\"]"
+    },
+    {
+      "name": "unchecked accepted",
+      "old": "r[\"complete\"] and r[\"checked\"] and",
+      "new": "r[\"complete\"] and"
+    },
+    {
+      "name": "losing moves accepted",
+      "old": " and r[\"moves_win\"] and",
+      "new": " and"
+    },
+    {
+      "name": "uncertified leaves accepted",
+      "old": "and r[\"leaves_certified\"]\n",
+      "new": "\n"
+    },
+    {
+      "name": "library size unchecked",
+      "old": "and r[\"shared\"] == len(library) and r[\"maps\"]",
+      "new": "and r[\"maps\"]"
+    },
+    {
+      "name": "library maps unchecked",
+      "old": "and r[\"maps\"][1:1 + len(library)] == [m for m, _ in library]\n",
+      "new": "\n"
+    },
+    {
+      "name": "library cells unchecked",
+      "old": "\n                and r[\"map_empty\"][1:1 + len(library)] == [empty for _, empty in library])",
+      "new": ")"
+    },
+    {
+      "name": "no pairs tried",
+      "old": "        if trial[0] >= best:\n            pairs",
+      "new": "        if False:\n            pairs"
+    },
+    {
+      "name": "one swap only",
+      "old": "        best, chosen = trial\n",
+      "new": "        return {k: label for k, (label, _) in trial[1].items()}, trial[0]\n"
+    },
+    {
+      "name": "a swap that does not shrink taken",
+      "old": "        if trial[0] >= best:\n            return",
+      "new": "        if trial[0] > best:\n            return"
+    },
+    {
+      "name": "built pieces not swapped in",
+      "old": "            out[k] = option\n",
+      "new": "            pass\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-01T17:47:11+00:00",
+    "killed": 24,
+    "survived": [],
+    "killed_by": {
+      "kids of built positions kept": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_chooser_counts_what_two_builds_save_together",
+        "test_the_chooser_keeps_swapping_while_the_game_shrinks",
+        "test_the_chooser_takes_a_build_only_where_the_whole_game_shrinks"
+      ],
+      "trivial positions free": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once"
+      ],
+      "a move for every position": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_chooser_counts_what_two_builds_save_together",
+        "test_the_chooser_keeps_swapping_while_the_game_shrinks"
+      ],
+      "opening moves at 3 bits": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once"
+      ],
+      "opening trivial free": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once"
+      ],
+      "base maps unpaid": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once"
+      ],
+      "built maps unpaid": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_the_chooser_takes_a_build_only_where_the_whole_game_shrinks"
+      ],
+      "built strategies free": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_a_library_map_no_kept_piece_plays_any_more_is_no_longer_paid",
+        "test_the_chooser_takes_a_build_only_where_the_whole_game_shrinks",
+        "test_with_nothing_better_the_chooser_keeps_the_base_game"
+      ],
+      "base strategies free": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once",
+        "test_the_chooser_counts_what_two_builds_save_together"
+      ],
+      "maps free": [
+        "test_a_built_piece_replaces_the_move_the_trivial_positions_and_strategies_only_it_reached",
+        "test_the_base_game_is_its_opening_moves_trivial_positions_strategies_and_maps_once",
+        "test_the_chooser_takes_a_build_only_where_the_whole_game_shrinks"
+      ],
+      "the empty map read as a library map": [
+        "test_a_piece_is_its_strategy_bits_and_the_library_maps_its_leaves_play"
+      ],
+      "own maps read as library maps": [
+        "test_a_piece_is_its_strategy_bits_and_the_library_maps_its_leaves_play"
+      ],
+      "the last library map missed": [
+        "test_a_piece_is_its_strategy_bits_and_the_library_maps_its_leaves_play"
+      ],
+      "unfinished accepted": ["test_only_finished_checked_pieces_built_from_the_library_are_valid"],
+      "unchecked accepted": ["test_only_finished_checked_pieces_built_from_the_library_are_valid"],
+      "losing moves accepted": [
+        "test_only_finished_checked_pieces_built_from_the_library_are_valid"
+      ],
+      "uncertified leaves accepted": [
+        "test_only_finished_checked_pieces_built_from_the_library_are_valid"
+      ],
+      "library size unchecked": [
+        "test_only_finished_checked_pieces_built_from_the_library_are_valid"
+      ],
+      "library maps unchecked": [
+        "test_only_finished_checked_pieces_built_from_the_library_are_valid"
+      ],
+      "library cells unchecked": [
+        "test_only_finished_checked_pieces_built_from_the_library_are_valid"
+      ],
+      "no pairs tried": ["test_the_chooser_counts_what_two_builds_save_together"],
+      "one swap only": ["test_the_chooser_keeps_swapping_while_the_game_shrinks"],
+      "a swap that does not shrink taken": ["timeout after 60s"],
+      "built pieces not swapped in": [
+        "test_the_chooser_counts_what_two_builds_save_together",
+        "test_the_chooser_keeps_swapping_while_the_game_shrinks",
+        "test_the_chooser_takes_a_build_only_where_the_whole_game_shrinks"
+      ]
+    }
+  }
+}

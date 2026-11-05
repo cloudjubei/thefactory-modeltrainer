@@ -1,0 +1,194 @@
+{
+  "file": "harness/floor_e1.py",
+  "tests": ["tests/test_floor_e1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another ply",
+      "old": "\"ply\": 6,",
+      "new": "\"ply\": 8,"
+    },
+    {
+      "name": "another draw order",
+      "old": "\"seed\": G3[\"seed\"],",
+      "new": "\"seed\": G3[\"seed\"] + 1,"
+    },
+    {
+      "name": "other positions",
+      "old": "\"indices\": [18, 39, 69, 79, 115, 130, 145, 146]",
+      "new": "\"indices\": [18, 39, 69, 79, 115, 130, 145, 147]"
+    },
+    {
+      "name": "completion bar lowered",
+      "old": "\"complete_support\": 7,",
+      "new": "\"complete_support\": 6,"
+    },
+    {
+      "name": "shorter cap",
+      "old": "\"seconds\": 21_600.0",
+      "new": "\"seconds\": 7_200.0"
+    },
+    {
+      "name": "ply 8 searched briefly",
+      "old": "[2, 1200.0], [4, 30.0]",
+      "new": "[2, 30.0], [4, 30.0]"
+    },
+    {
+      "name": "size bar raised",
+      "old": "\"support\": (4, 5)",
+      "new": "\"support\": (9, 10)"
+    },
+    {
+      "name": "other g3 subtree bits",
+      "old": "\"g3_subtree_bits\": 47_038}",
+      "new": "\"g3_subtree_bits\": 47_039}"
+    },
+    {
+      "name": "opening move free",
+      "old": "        out.append(4 + len(kids)",
+      "new": "        out.append(len(kids)"
+    },
+    {
+      "name": "trivial positions free",
+      "old": "        out.append(4 + len(kids) - len(built) + ",
+      "new": "        out.append(4 + "
+    },
+    {
+      "name": "g3 strategies recoded fixed",
+      "old": "len(built) + sum(_coded(r) for r in built))",
+      "new": "len(built) + sum(r[\"bits\"][\"nodes\"] for r in built))"
+    },
+    {
+      "name": "terminal replies counted",
+      "old": "            if not GAME.is_terminal(c)]",
+      "new": "            if True]"
+    },
+    {
+      "name": "integrity unchecked",
+      "old": "    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n    states",
+      "new": "    if False:\n        return {\"verdict\": \"not_run\"}\n    states"
+    },
+    {
+      "name": "unfinished g3 accepted",
+      "old": "    if not all(r[\"complete\"] for s in states for r in _below(s, roots, moves)[1]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "control at any bits",
+      "old": "    if control != spec[\"g3_subtree_bits\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "library size unchecked",
+      "old": "        if (r[\"shared\"] != len(library) or r[\"maps\"]",
+      "new": "        if (r[\"maps\"]"
+    },
+    {
+      "name": "library cells unchecked",
+      "old": "                or r[\"map_empty\"][1:1 + len(library)] != [empty for _, empty in library]):",
+      "new": "                or False):"
+    },
+    {
+      "name": "library maps g3 played charged",
+      "old": "for i in played(e[\"roots\"]) - played(g3[\"roots\"]))",
+      "new": "for i in played(e[\"roots\"]))"
+    },
+    {
+      "name": "extra library free",
+      "old": "    bits = sum(_coded(r) for r in e[\"roots\"]) + extra",
+      "new": "    bits = sum(_coded(r) for r in e[\"roots\"])"
+    },
+    {
+      "name": "unfinished arm counted complete",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])",
+      "new": "    lower = False"
+    },
+    {
+      "name": "refuted only above g3",
+      "old": "(\"refuted\" if bits >= control else",
+      "new": "(\"refuted\" if bits > control else"
+    },
+    {
+      "name": "support strict",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "a lower bound can support",
+      "old": "\"supported\" if not lower and den",
+      "new": "\"supported\" if den"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-30T02:44:51+00:00",
+    "killed": 23,
+    "survived": [],
+    "killed_by": {
+      "another ply": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "another draw order": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "other positions": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "completion bar lowered": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "shorter cap": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "ply 8 searched briefly": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "size bar raised": [
+        "test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6",
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "other g3 subtree bits": ["test_e1_rebuilds_g3_s_heaviest_ply_6_subtrees_from_ply_6"],
+      "opening move free": [
+        "test_a_reply_that_ends_the_game_is_no_position_below",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_bits_for_a_subtree_are_its_opening_move_its_trivial_positions_and_its_strategies",
+        "test_the_arm_is_its_strategies_by_first_use_and_the_library_maps_g3_never_played",
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "trivial positions free": [
+        "test_a_reply_that_ends_the_game_is_no_position_below",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_bits_for_a_subtree_are_its_opening_move_its_trivial_positions_and_its_strategies",
+        "test_the_arm_is_its_strategies_by_first_use_and_the_library_maps_g3_never_played",
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "g3 strategies recoded fixed": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_g3_s_bits_for_a_subtree_are_its_opening_move_its_trivial_positions_and_its_strategies",
+        "test_the_arm_is_its_strategies_by_first_use_and_the_library_maps_g3_never_played",
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "terminal replies counted": ["test_a_reply_that_ends_the_game_is_no_position_below"],
+      "integrity unchecked": [
+        "test_a_build_that_did_not_start_from_g3_s_library_or_its_registration_is_not_judged"
+      ],
+      "unfinished g3 accepted": [
+        "test_g3_must_have_finished_every_position_below_the_rebuilt_subtrees"
+      ],
+      "control at any bits": [
+        "test_a_build_that_did_not_start_from_g3_s_library_or_its_registration_is_not_judged"
+      ],
+      "library size unchecked": [
+        "test_a_build_that_did_not_start_from_g3_s_library_or_its_registration_is_not_judged"
+      ],
+      "library cells unchecked": [
+        "test_a_build_that_did_not_start_from_g3_s_library_or_its_registration_is_not_judged"
+      ],
+      "library maps g3 played charged": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_arm_is_its_strategies_by_first_use_and_the_library_maps_g3_never_played",
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "extra library free": [
+        "test_the_arm_is_its_strategies_by_first_use_and_the_library_maps_g3_never_played"
+      ],
+      "unfinished arm counted complete": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "refuted only above g3": [
+        "test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"
+      ],
+      "support strict": ["test_the_verdict_is_judged_against_g3_s_bits_for_the_same_subtrees"],
+      "a lower bound can support": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ]
+    }
+  }
+}

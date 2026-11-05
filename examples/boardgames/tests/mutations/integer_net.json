@@ -1,0 +1,155 @@
+{
+  "file": "harness/integer_net.py",
+  "tests": ["tests/test_integer_net.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "own cells read as the opponent's",
+      "old": "        out += [int(v == own), int(v not in (0, own)), int(v == 0)]",
+      "new": "        out += [int(v not in (0, own)), int(v == own), int(v == 0)]"
+    },
+    {
+      "name": "wins and losses in two swapped",
+      "old": "            out += [1, int(facts._wins_in_two(state, a)), int(facts._loses_in_two(state, a))]",
+      "new": "            out += [1, int(facts._loses_in_two(state, a)), int(facts._wins_in_two(state, a))]"
+    },
+    {
+      "name": "unsafe moves read as safe",
+      "old": "        if a in safe:",
+      "new": "        if True:"
+    },
+    {
+      "name": "steps of a wider net",
+      "old": "    steps = 2 ** (bits - 1) - 1\n    scale",
+      "new": "    steps = 2 ** bits - 1\n    scale"
+    },
+    {
+      "name": "a net not quantized accepted",
+      "old": "    if np.abs(q).max() > steps or not np.array_equal(q.astype(np.float32) * scale, stored):",
+      "new": "    if np.abs(q).max() > steps:"
+    },
+    {
+      "name": "the hidden layer's smaller denominator",
+      "old": "        d1 = max(f1.denominator, fb1.denominator)",
+      "new": "        d1 = min(f1.denominator, fb1.denominator)"
+    },
+    {
+      "name": "the output's smaller denominator",
+      "old": "        d2 = max(f2.denominator, fb2.denominator)",
+      "new": "        d2 = min(f2.denominator, fb2.denominator)"
+    },
+    {
+      "name": "output bias not lifted to the hidden unit",
+      "old": "int(fb2 * d2 * d1))",
+      "new": "int(fb2 * d2))"
+    },
+    {
+      "name": "unit without the hidden denominator",
+      "old": "        self.unit = Fraction(1, d1 * d2)",
+      "new": "        self.unit = Fraction(1, d2)"
+    },
+    {
+      "name": "no relu",
+      "old": "        s = self.q2 @ np.maximum(h, 0)",
+      "new": "        s = self.q2 @ h"
+    },
+    {
+      "name": "no hidden bias",
+      "old": "        h = self.c1 * (self.q1 @ np.asarray(x, dtype=np.int64)) + self.cb1 * self.qb1",
+      "new": "        h = self.c1 * (self.q1 @ np.asarray(x, dtype=np.int64))"
+    },
+    {
+      "name": "ties to the highest move",
+      "old": "        return min(moves, key=lambda a: (-s[a], a))",
+      "new": "        return min(moves, key=lambda a: (-s[a], -a))"
+    },
+    {
+      "name": "the lowest score best",
+      "old": "        return min(moves, key=lambda a: (-s[a], a))",
+      "new": "        return min(moves, key=lambda a: (s[a], a))"
+    },
+    {
+      "name": "no 64-bit bound",
+      "old": "            raise ValueError(\"the net's scales are too far apart to score in 64 bits\")",
+      "new": "            pass"
+    },
+    {
+      "name": "shape read transposed",
+      "old": "        self.hidden, self.n_in = q1.shape",
+      "new": "        self.n_in, self.hidden = q1.shape"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-29T07:42:57+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "own cells read as the opponent's": [
+        "test_the_features_are_n1_s[1]",
+        "test_the_features_are_n1_s[2]"
+      ],
+      "wins and losses in two swapped": [
+        "test_the_features_are_n1_s[1]",
+        "test_the_features_are_n1_s[2]"
+      ],
+      "unsafe moves read as safe": [
+        "test_the_features_are_n1_s[1]",
+        "test_the_features_are_n1_s[2]"
+      ],
+      "steps of a wider net": [
+        "test_scales_too_far_apart_for_64_bits_are_refused",
+        "test_the_best_move_is_the_highest_score_the_lowest_on_a_tie",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[3-1-shape1]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[4-0-shape0]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]",
+        "test_the_scores_follow_the_float_net",
+        "test_the_steps_times_the_scales_give_back_every_weight[3-1-shape1]",
+        "test_the_steps_times_the_scales_give_back_every_weight[4-0-shape0]",
+        "test_the_steps_times_the_scales_give_back_every_weight[6-2-shape2]"
+      ],
+      "a net not quantized accepted": ["test_a_net_that_is_not_quantized_is_refused"],
+      "the hidden layer's smaller denominator": [
+        "test_scales_too_far_apart_for_64_bits_are_refused",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]"
+      ],
+      "the output's smaller denominator": [
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]"
+      ],
+      "output bias not lifted to the hidden unit": [
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[3-1-shape1]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[4-0-shape0]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]",
+        "test_the_scores_follow_the_float_net"
+      ],
+      "unit without the hidden denominator": [
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[3-1-shape1]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[4-0-shape0]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]",
+        "test_the_scores_follow_the_float_net"
+      ],
+      "no relu": [
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[3-1-shape1]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[4-0-shape0]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]",
+        "test_the_scores_follow_the_float_net"
+      ],
+      "no hidden bias": [
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[3-1-shape1]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[4-0-shape0]",
+        "test_the_scores_are_the_exact_outputs_in_one_positive_unit[6-2-shape2]",
+        "test_the_scores_follow_the_float_net"
+      ],
+      "ties to the highest move": ["test_the_best_move_is_the_highest_score_the_lowest_on_a_tie"],
+      "the lowest score best": [
+        "test_a_zero_tensor_is_zero_steps_at_scale_zero",
+        "test_the_best_move_is_the_highest_score_the_lowest_on_a_tie"
+      ],
+      "no 64-bit bound": ["test_scales_too_far_apart_for_64_bits_are_refused"],
+      "shape read transposed": [
+        "test_the_steps_times_the_scales_give_back_every_weight[3-1-shape1]",
+        "test_the_steps_times_the_scales_give_back_every_weight[4-0-shape0]",
+        "test_the_steps_times_the_scales_give_back_every_weight[6-2-shape2]"
+      ]
+    }
+  }
+}

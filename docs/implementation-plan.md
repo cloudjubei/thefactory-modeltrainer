@@ -552,11 +552,143 @@ rule standalone and in decision-list order, by ply.
   - **F3 result (h310 supported, h311 inconclusive — pre-registered; h323 after the data): the tie-break is ten
     positions.** F2 rebuilt with L6's rule: 671/671, 422,227 bits against F2's 455,959 (0.93, nine tenths needed);
     ten positions hold 32,763 of the 33,732 bits saved (smaller on 335, larger on 246). 297 CPU-hours against 216.
-  - **Running 2026-10-26 (user's choice): G3 — a third pass.** All 671 positions built again from every map G2's
-    whole game holds — the 1,099 F2 maps it plays, then its own 931 (`harness/floor_g3.py` `g3_library`, 23/23
-    mutants), written by `scripts/c4_library_file.py` to `library_from`; no measured code changed. h324 (all
-    complete), h325 (nine tenths of G2's 293,843, recomputed from G2's and F2's evidence). 4 workers, the only run.
-    Passes continue while one gains a tenth.
+  - **G3 result (h324 supported, h325 inconclusive — pre-registered; h326 after the data): the third pass gains
+    4.5%, the passes stop.** All 671 positions from the 2,030 maps G2's whole game holds: 671/671, 280,640 bits
+    against G2's 293,843 (0.955, nine tenths needed). Smaller on 562, larger on 103; the strategies 202,670 ->
+    176,750 but the library maps played 90,098 -> 102,815. 151 CPU-hours. 280,640 bits is the smallest certified
+    whole game so far.
+  - **N2 result (h327 supported, h328 refuted — pre-registered; h329 after the data): the learned default in the
+    build is no better a tie-break than tactics.** L4's 32 positions (held out of N1's training) with L5's rule and
+    pipeline, a deciding level's ties broken by N1's 19,996-bit net (`Facts` order "net"; `harness/integer_net.py`
+    scores it exactly in integers so the Python rule and the C walk agree). 31/32 complete, 206,744 bits (a lower
+    bound, #218 unfinished) against L6's 102,289. Four builds (#113, #207, #218, #240) ran while the machine was
+    swapping (fseventsd ~16 GB) and overran the 2-hour cap threefold; on the other 28: 68,693 bits against L6's 55,809
+    and L5's 64,648, smaller on 11, larger on 15 (p = 0.56). Were the four as small as L6's, 115,173 > 102,289 — so
+    refuted whatever the overload cost. The tie-break lever is closed at tactics. 45.3 hours of builds.
+  - **R2 result (h330 supported, h331 refuted — pre-registered; h341 after the data): counting references as judged
+    makes the builder's strategies larger.** All 16 complete, but 82,251 bits against G1's 74,556 (larger on 10, smaller
+    on 6, p = 0.45). Cheaper references make splitting pay: 2,173 leaves and 449 moves against 1,513 and 283, for
+    14,639 exception bits against 19,101. The builder's local leaf-or-split choice is not the lever; the full-width
+    price was holding the tree back. Load-biased caps (17.6 h of builds against G1's 14.7, 1,093 searches against
+    1,138, one at the cap) cannot explain a tenth.
+  - **R2 — the builder counting references by first_use (run 2026-10-29 21:50Z to 10-30 02:51Z).** `Builder(refs=
+    "first_use")` charges each reference as the judges code a finished build (`first_use_references`: decoder order
+    from the root, unbuilt positions skipped, unplayed own maps no reference) instead of the index's full width (10
+    bits a leaf at G1's 767-map lists). G1 rebuilt with only that changed (`harness.floor_r2`, fingerprint
+    77fc4515e75e, 4 workers, PID 15728): h330 (14 of 16 complete), h331 (nine tenths of G1's 74,556). Its judge takes
+    off what the builder charged and adds the judges' code — `floor_g1._coded` would recode a fixed-width count (the
+    smoke on #605 read 318 bits that way; the true count is 510, against G1's 493). The Mac restarted 10-29 ~23:15Z
+    after 3 of 16 (#113, #216, #240); resumed with `--resume` once the load settled. Option 8 (user's choice) done:
+    `docs/research/connect4-certified-strategy.md`.
+  - **Y1 result (h332 supported, h333 not judged — pre-registered; h334 after the data): WeakC4's edge is its tree,
+    not its language.** Option 4 began, by the user's choice, with WeakC4 as a yardstick (`scripts/c4_weakc4_yardstick.py`
+    reads a local checkout, GPL-3, never copied; `harness/floor_y1.py`). Our exact rule reads 1,003 of its 1,009 leaf
+    diagrams as they are. In our code it takes 123,881 bits (0.44 of G3): 251 table moves and 1,009 leaves from ply 4
+    cost 6,401 bits with references; 95% is maps (ten levels on every cell). The levers it points at: leaves reached
+    earlier with larger coverage (the opening co-designed with the maps), and mirror sharing of maps.
+  - **X1 result (h335 refuted, h336 inconclusive — pre-registered): mirror sharing after the fact is small.** No G3
+    map mirrors another; 28 of 671 frontier positions pair up, saving 4.4%. Mirroring pays only at build time.
+  - **J1 (user's choice: assemble first; h349 after the data): the whole game assembled, 203,774 bits (0.73 of
+    G3's 280,640) — the smallest certified whole game so far.** `harness/floor_j1.py` (24/24 mutants): the ply-6
+    opening and at each of its 148 frontier positions G3's piece or one complete checked ply-6 build, each ply-8
+    position and library map paid once; with no builds it reproduces G3's 280,640 exactly. Chosen on the whole
+    game's bits (single swaps, then pairs): 30 of 39 positions take a build; 503 of 671 G3 strategies and 891 of
+    1,207 library maps remain. Saving 76,866, beyond the per-run sum (~54,000), because freed ply-8 positions and
+    library maps count. Next: every winning move at the next-heaviest multi-move ply-6 positions, in batches, each
+    batch re-assembled.
+  - **V1 (pre-registered h350, h351; launched 2026-11-01 19:17Z, PID 35483, 7 workers): every winning move,
+    batch 1.** At the 22 ply-6 positions with more than one winning move under which G3 pays at least 1,500 bits,
+    the 63 winning moves no E1/O1/E3 root played (a root left as a leaf plays none, so #13 is in), each built from
+    ply 6 with that move at the root, otherwise as E1. `harness/floor_v1.py` (26/26 mutants) re-assembles the whole
+    game with J1's chooser, never worse than without V1 (203,774), a tie keeping the earlier build. h350: 58 of 63
+    complete (49 or fewer refutes); h351: whole game at most 97/100 of 203,774 (99/100 or more refutes once all
+    finished). Estimated 12–24 h. Next batches: the positions below 1,500 bits, each re-assembled.
+  - **V1 result (h350, h351 supported — pre-registered; h352 after the data): 197,650 bits, 0.970 of J1 — the
+    smallest certified whole game so far.** 63/63 complete (115.5 build-hours); 8 of V1's builds taken, 36 positions
+    in all. At 4 of the 5 V1 positions taking none every ply-8 position below is shared with another ply-6 position
+    keeping G3's piece, so a build saves at most 4 bits (#13's 66-bit move not taken). Transpositions join the 148
+    ply-6 positions into groups of up to 10; the pairwise chooser cannot use such builds. Open: a group-aware
+    assembler (no builds) before or alongside batch 2.
+  - **J2 (user's choice: group assembler first; h353 after the data): adds nothing — 197,650 again.**
+    `harness/floor_j2.py` (16/16) swaps every subset of a transposition group's positions with builds at once. The
+    untaken builds wait on group members with no build (22; six with a single winning move), so batches go by group.
+  - **V2 (pre-registered h354, h355; launched 2026-11-02 15:57Z, PID 43108, 7 workers): every winning move by
+    group.** `harness/floor_v2.py` (35/35): the groups on which the assembled game (J1 then J2: 197,650) still pays
+    at least 4,000 bits; each unbuilt winning move at multi-move members, a free build at unbuilt single-move members:
+    67 builds, 9 groups, 6 free (incl. never-built heavy #2, #68, #96). h354: 62/67 complete (52 or fewer refutes);
+    h355: whole game at most 97/100 of 197,650 (99/100 or more refutes once all finished). Next: lower groups.
+  - **V2 result (h354 supported, h355 inconclusive — pre-registered; h356 after the data): 192,591 bits, 0.974 —
+    the smallest certified whole game so far, 871 bits short of the 97/100 bar.** 67/67 complete (107.5 build-hours);
+    16 of V2's builds taken, 51 positions in all; one group (#91–#114) gives 1,920 of the 5,059 bits. Free builds at
+    heavy single-move positions save 10–11% or nothing (#96). Every winning move is built in all but one of the 11
+    groups still paying ≥ 3,000 bits (29% of the game); a 2,000-bit batch would be 51 builds in 8 groups. Library
+    72,637 bits (38%) is now the largest part. Open: next lever — lighter groups, the library, or the builder itself.
+  - **G4 (user's choice: the library pass; pre-registered h357, h358; launched 2026-11-03 13:46Z, PID 54897, 7
+    workers): the 409 G3 ply-8 strategies the assembled game keeps, rebuilt from every map it holds.**
+    `harness/floor_g4.py` (25/25): library = G3's 2,030 + those strategies' 236 own maps + the taken builds' 264
+    (2,530); re-assembled with rebuilds in place (single rebuilds that grow the game sent back), ply-6 builds chosen
+    again. h357: 409/409 complete (≤ 401 refutes); h358: ≤ 97/100 of 192,591 (≥ 99/100 refutes). ~67 CPU-h.
+  - **G4 result (h357, h358 supported — pre-registered; h359 after the data): 184,556 bits, 0.958 — the smallest
+    certified whole game so far.** 409/409 complete (55.2 build-hours against G3's 67.0). The 409 rebuilds take 55,928
+    bits against 61,427, but all in at once grow the game to 195,394 (new maps); the revert loop keeps 76 (22,674
+    against 29,270); one ply-6 build changes (#44). Library 71,109 bits (816 maps, 83 new), strategies 54,831, builds
+    57,771.
+  - **U1 (user's choice; h360 after the data; no new builds): 184,328 bits, 228 fewer than G4 (0.9988).**
+    `harness/floor_u1.py` (23/23): local search over G4's rebuilds, one rebuild or every rebuild playing one map per
+    move, from none and from all kept; 66 kept; V2's ply-6 choice stays (afresh would take 184,386). Library 70,849
+    bits (814 maps), strategies 54,952, builds 57,682.
+  - **Z1 (user's choice: rebuild the ply-6 builds; pre-registered h361, h362; launched 2026-11-04 03:09Z, PID 98347, 7
+    workers): the 51 builds the game takes, rebuilt from every map it holds.** `harness/floor_z1.py` (30/30): library
+    = G4's 2,530 + the 68 own maps of U1's 66 kept rebuilds (2,598); same positions and root moves, 6-hour cap;
+    rebuilds chosen by U1's search. h361: at least 48/51 complete (≤ 40 refutes); h362: ≤ 97/100 of 184,328 (≥ 99/100
+    refutes). ~61 build-hours.
+  - **Z1 result (h361 supported, h362 inconclusive — pre-registered; h363 after the data): 180,199 bits, 0.9776 of
+    184,328.** 51/51 complete, 58.3 build-hours. Bar 178,798 missed by 1,401 bits. U1's search takes the same 27 from
+    none and from all; all 51 would take 186,419. Library 73,329 bits (837 maps), strategies 54,952, builds 51,073.
+  - **X2 (user's choice: mirror maps in builds; pre-registered h365, h366; h364 after the data): every map also read
+    on the mirrored board.** `harness/mirror_builder.py` (26/26) and `harness/floor_x2.py` (33/33): Z1's 51 rebuilt at
+    the same positions and root moves from the same 2,598 maps, the library twice (mirrored readings first, plain
+    after), a mirrored reading paying its map once with the plain one. h365: at least 48/51 complete (≤ 40 refutes);
+    h366: ≤ 97/100 of 180,199 (≥ 99/100 refutes). Probe with no build (h364): flipped maps cover 0 of 343 move nodes,
+    mirrored readings 18. ~58 build-hours.
+  - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
+    free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
+    against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);
+    #18 4, #69 1, #79 4, #146 4 saved 1,839-3,696 bits each. 35.1 hours of builds, 08:59Z-15:24Z. Next: assemble a
+    whole game (G3 with E1, O1 and E3's best subtrees swapped in), and decide whether to build every winning move at
+    the other ply-6 positions (383 position-move pairs in all; 114 positions have more than one).
+  - **E3 registered (user's plan: every winning move on a sample of heavy positions):** `harness/floor_e3.py`.
+    The builder gained `root_move` (the root plays that winning move; below it the rule chooses as ever; 6 new
+    mutants, 108/108), and the build script a SPEC's `root_moves`; measurement fingerprint 3981ea9f5020. At E1's 8
+    heaviest positions (#39 has one winning move) E3 builds the 13 winning moves E1's roots did not play, as E1 built
+    its 8. h346 (12 of 13 complete), h347 (the cheapest complete build at each of the 7 at most nine tenths of E1's
+    28,712 bits; refuted at 97/100). Judge 32/32 mutants; setup dry-run, one 10-second build checked. Launched
+    2026-11-01 08:59Z, 7 workers.
+  - **O1 result (h343, h344 supported — pre-registered; h345 after the data): the builder's move at ply 6 cuts
+    these subtrees to 0.40.** All 31 complete; 20,704 bits against G3's 51,312. 28 smaller, 3 larger (#3 3,983 against
+    1,766; #43; #92); 5 became one leaf at ply 6 (#13, #21, #52, #54, #127). 27.4 hours of builds, 10:39Z-18:25Z.
+    With E1: about 42,700 of G3's 280,640 bits saved on 39 of the 148 ply-6 positions, before any whole-game assembly.
+    Next (user's plan): E3, every winning move on a sample of heavy positions.
+  - **O1 registered (user's choice: library pick on all, then a sample of every move):** `harness/floor_o1.py`.
+    `scripts/c4_library_pick_scope.py` (evidence/c49_o1_scope.json.gz, no builds) runs the builder's move rule with
+    G3's library at each of the 148 ply-6 positions: 114 have more than one winning move (383 pairs), and on 34 the
+    pick differs from the opening's (69,468 of G3's bits), E1's three among them. O1 builds the 31 beyond E1's 8
+    (51,312 bits) exactly as E1 did. h343 (29 of 31 complete), h344 (three quarters of 51,312). Judge 15/15 mutants;
+    setup dry-run through the build script before registering. Then E3: every winning move on a sample of heavy
+    positions, to see whether trying every move beats the free pick.
+  - **E1 result (h339, h340 supported — pre-registered; h342 after the data): the opening's move is the lever, not
+    earlier leaves.** All 8 heaviest ply-6 subtrees complete; 34,976 bits against G3's 47,038 (0.74), library maps G3
+    never played included. No root became a leaf. On #115, #130 and #145 the builder played another winning move than
+    the opening's lowest column: 18,156 bits fell to 2,840. The five that kept the opening's move: 30,235 against
+    28,882. 16.9 hours of builds. h337/h338 superseded by h339/h340. Next lever (user's call): an opening whose moves
+    are chosen by the cost of what lies below them.
+  - **E1 registered (user's choice: earlier leaves):** `harness/floor_e1.py` — of the opening's 148 ply-6 positions,
+    the 8 under which G3 paid most (47,038 bits: the opening's move, trivial positions, G3's strategies), each built
+    from ply 6 with G3's rule, pipeline and library, leaves allowed at ply 6, 6 hours a position, 20-minute searches
+    at plies 6 and 8. h339 (7 of 8 complete), h340 (four fifths of 47,038). Judge 23/23 mutants. The first launch
+    stopped at startup (the spec had no `seed`, which the build script reads before the spec's indices replace its
+    order); the spec now carries G3's seed, so h337/h338 (pinned to the old spec) were registered again as h339/h340
+    and are retired once those have results.
   - **N1 result (h317 supported — pre-registered): a learned default keeps the win where the orders miss.** A
     19,996-bit net (`harness/learned_default.py`: cells as the mover sees them + each move's safe / wins-in-two /
     loses-in-two facts, 32 hidden, 4-bit weights) trained on 83,022 solved positions from F2's strategies misses the

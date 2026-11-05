@@ -25,8 +25,10 @@ ERRORS = {3: "a position the oracle's winning moves reach has no winning move �
           4: "a line the oracle's winning moves lead to is not won — the oracle is wrong",
           6: f"more than {MAX_EXCEPTIONS} exceptions — raise MAX_EXCEPTIONS",
           7: "the C walk ran out of memory"}
+ORDERS = {"lowest": 0, "tactics": 1, "net": 2}
 _LIB = None
 _BUFFERS = None
+_NET = None
 
 
 def _library():
@@ -49,6 +51,9 @@ def _library():
                                        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int64,
                                        ctypes.c_double, i64p, i64p]
         lib.c4_verify_walk.restype = ctypes.c_int
+        lib.c4_leaf_set_net.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, i8p, i8p, i8p, i8p,
+                                        ctypes.c_int64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64]
+        lib.c4_leaf_set_net.restype = ctypes.c_int
         if not lib.c4_leaf_init(LOG2_SOLVER_TABLE, LOG2_MOVE_CACHE):
             raise MemoryError("could not allocate the C walk's tables")
         _LIB = lib
@@ -92,6 +97,22 @@ def _buffers():
     return _BUFFERS
 
 
+def _order(lib, facts) -> int:
+    """The C walk's code for `facts.order`, its net handed to the C walk first when it is not the one there."""
+    global _NET
+    if facts.order == "net" and _NET is not facts.net:
+        net = facts.net
+
+        def steps(q):
+            return (ctypes.c_int8 * q.size)(*q.reshape(-1).tolist())
+
+        if not lib.c4_leaf_set_net(net.n_in, net.hidden, net.n_out, steps(net.q1), steps(net.qb1), steps(net.q2),
+                                   steps(net.qb2), net.c1, net.cb1, net.c2, net.cb2):
+            raise ValueError("the C walk scores only Connect-4 nets: 147 features, 7 outputs, 1-256 hidden units")
+        _NET = net
+    return ORDERS[facts.order]
+
+
 VERIFY_REASONS = {0: None, 1: "cap", 2: "timeout", 8: "undefined", 9: "draw", 10: "loss"}
 
 
@@ -109,7 +130,7 @@ def verify(facts, root, levels: dict, n_levels: int, cap: int = 1_000_000, deadl
     own, walked = ctypes.c_int64(0), ctypes.c_int64(0)
     seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())
     status = lib.c4_verify_walk(position, mask, moves, cells, n_levels, levels.get(SWITCH, -1), facts.ties == "lowest",
-                                facts.safe_depth, facts.forcing, facts.unlevelled == "last", facts.order == "tactics",
+                                facts.safe_depth, facts.forcing, facts.unlevelled == "last", _order(lib, facts),
                                 cap, seconds, ctypes.byref(own), ctypes.byref(walked))
     if status not in VERIFY_REASONS:
         raise RuntimeError(ERRORS[status])
@@ -127,7 +148,7 @@ def needed(facts, root, levels: dict, n_levels: int, winning, cap: int, deadline
     count, own = ctypes.c_int64(0), ctypes.c_int64(0)
     seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())
     status = lib.c4_leaf_walk(position, mask, moves, cells, n_levels, levels.get(SWITCH, -1), facts.ties == "lowest",
-                              facts.safe_depth, facts.forcing, facts.unlevelled == "last", facts.order == "tactics",
+                              facts.safe_depth, facts.forcing, facts.unlevelled == "last", _order(lib, facts),
                               cap, seconds, exc_position, exc_mask, exc_move, MAX_EXCEPTIONS, ctypes.byref(count),
                               ctypes.byref(own))
     if status == 5:

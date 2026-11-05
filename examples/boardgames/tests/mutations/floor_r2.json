@@ -1,0 +1,188 @@
+{
+  "file": "harness/floor_r2.py",
+  "tests": ["tests/test_floor_r2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "another fingerprint",
+      "old": "\"measurement_fp\": \"77fc4515e75e\"",
+      "new": "\"measurement_fp\": \"77fc4515e750\""
+    },
+    {
+      "name": "references by the fixed code",
+      "old": "\"refs\": \"first_use\"}",
+      "new": "\"refs\": \"fixed\"}"
+    },
+    {
+      "name": "other g1 bits",
+      "old": "\"g1_bits\": 74_556}",
+      "new": "\"g1_bits\": 74_557}"
+    },
+    {
+      "name": "integrity unchecked",
+      "old": "    if (_integrity(e, spec) or before",
+      "new": "    if (before"
+    },
+    {
+      "name": "an unjudged g1 accepted",
+      "old": "before[\"verdict\"] == \"not_run\" or before[\"lower_bound\"]",
+      "new": "before.get(\"lower_bound\", False)"
+    },
+    {
+      "name": "an unfinished g1 accepted",
+      "old": "or before[\"lower_bound\"]\n",
+      "new": "\n"
+    },
+    {
+      "name": "g1 at any bits",
+      "old": "            or before[\"bits\"] != spec[\"g1_bits\"]):",
+      "new": "            or False):"
+    },
+    {
+      "name": "library size unchecked",
+      "old": "        if (r[\"shared\"] != len(library) or r[\"maps\"]",
+      "new": "        if (r[\"maps\"]"
+    },
+    {
+      "name": "library maps unchecked",
+      "old": "or r[\"maps\"][1:1 + len(library)] != [m for m, _ in library]\n",
+      "new": "\n"
+    },
+    {
+      "name": "library cells unchecked",
+      "old": "                or r[\"map_empty\"][1:1 + len(library)] != [empty for _, empty in library]):",
+      "new": "                or False):"
+    },
+    {
+      "name": "the empty map paid as library",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)}",
+      "new": "if 0 <= n.get(\"leaf\", 0) <= len(library)}"
+    },
+    {
+      "name": "own maps paid as library",
+      "old": "if 1 <= n.get(\"leaf\", 0) <= len(library)}",
+      "new": "if 1 <= n.get(\"leaf\", 0)}"
+    },
+    {
+      "name": "library maps paid per play",
+      "old": "    played = {n[\"leaf\"] for r in e[\"roots\"] for _, _, n in r[\"nodes\"] if 1 <= n.get(\"leaf\", 0) <= len(library)}",
+      "new": "    played = [n[\"leaf\"] for r in e[\"roots\"] for _, _, n in r[\"nodes\"] if 1 <= n.get(\"leaf\", 0) <= len(library)]"
+    },
+    {
+      "name": "library maps free",
+      "old": "    bits = sum(r2_coded(r) for r in e[\"roots\"]) + shared",
+      "new": "    bits = sum(r2_coded(r) for r in e[\"roots\"])"
+    },
+    {
+      "name": "an unfinished arm counted complete",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])",
+      "new": "    lower = False"
+    },
+    {
+      "name": "refuted only above g1",
+      "old": "if ratio >= 1 else",
+      "new": "if ratio > 1 else"
+    },
+    {
+      "name": "supported only under the bar",
+      "old": "ratio <= spec[\"support\"]",
+      "new": "ratio < spec[\"support\"]"
+    },
+    {
+      "name": "a lower bound can support",
+      "old": "\"supported\" if not lower and ratio",
+      "new": "\"supported\" if ratio"
+    },
+    {
+      "name": "the builder's charge kept",
+      "old": "    bits = r[\"bits\"][\"nodes\"] - first_use_references(game, root, nodes, r[\"shared\"])",
+      "new": "    bits = r[\"bits\"][\"nodes\"]"
+    },
+    {
+      "name": "an unfinished root keeps the judges' references",
+      "old": "    if not r[\"complete\"]:\n        return bits",
+      "new": "    if False:\n        return bits"
+    },
+    {
+      "name": "a finished root loses its references",
+      "old": "    if not r[\"complete\"]:\n        return bits",
+      "new": "    if True:\n        return bits"
+    },
+    {
+      "name": "references recoded by the fixed code",
+      "old": "code_bits(\"first_use\", walk_leaves(",
+      "new": "code_bits(\"fixed\", walk_leaves("
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-29T20:38:22+00:00",
+    "killed": 22,
+    "survived": [],
+    "killed_by": {
+      "another fingerprint": ["test_r2_is_g1_with_the_builder_counting_references_by_first_use"],
+      "references by the fixed code": [
+        "test_r2_is_g1_with_the_builder_counting_references_by_first_use"
+      ],
+      "other g1 bits": ["test_r2_is_g1_with_the_builder_counting_references_by_first_use"],
+      "integrity unchecked": ["test_a_run_off_its_registration_is_not_judged"],
+      "an unjudged g1 accepted": ["test_g1_must_be_judged_complete_at_its_registered_bits"],
+      "an unfinished g1 accepted": ["test_g1_must_be_judged_complete_at_its_registered_bits"],
+      "g1 at any bits": ["test_g1_must_be_judged_complete_at_its_registered_bits"],
+      "library size unchecked": ["test_a_build_that_did_not_start_from_g1_s_library_is_not_judged"],
+      "library maps unchecked": ["test_a_build_that_did_not_start_from_g1_s_library_is_not_judged"],
+      "library cells unchecked": [
+        "test_a_build_that_did_not_start_from_g1_s_library_is_not_judged"
+      ],
+      "the empty map paid as library": [
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library"
+      ],
+      "own maps paid as library": [
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library"
+      ],
+      "library maps paid per play": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_size_is_the_strategies_by_first_use_and_each_played_library_map_once",
+        "test_the_verdict_is_judged_against_g1_s_bits"
+      ],
+      "library maps free": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_size_is_the_strategies_by_first_use_and_each_played_library_map_once",
+        "test_the_verdict_is_judged_against_g1_s_bits"
+      ],
+      "an unfinished arm counted complete": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "refuted only above g1": ["test_the_verdict_is_judged_against_g1_s_bits"],
+      "supported only under the bar": ["test_the_verdict_is_judged_against_g1_s_bits"],
+      "a lower bound can support": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "the builder's charge kept": [
+        "test_a_finished_build_s_count_is_already_by_first_use_and_is_not_recoded",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_size_is_the_strategies_by_first_use_and_each_played_library_map_once",
+        "test_the_verdict_is_judged_against_g1_s_bits"
+      ],
+      "an unfinished root keeps the judges' references": [
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute"
+      ],
+      "a finished root loses its references": [
+        "test_a_finished_build_s_count_is_already_by_first_use_and_is_not_recoded",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_size_is_the_strategies_by_first_use_and_each_played_library_map_once",
+        "test_the_verdict_is_judged_against_g1_s_bits"
+      ],
+      "references recoded by the fixed code": [
+        "test_a_finished_build_s_count_is_already_by_first_use_and_is_not_recoded",
+        "test_an_unfinished_root_counts_without_its_references_and_can_only_refute",
+        "test_the_empty_map_and_a_build_s_own_maps_are_not_charged_as_library",
+        "test_the_size_is_the_strategies_by_first_use_and_each_played_library_map_once",
+        "test_the_verdict_is_judged_against_g1_s_bits"
+      ]
+    }
+  }
+}

@@ -78,7 +78,28 @@ RULES = [("exact", 1, False, "none", "lowest"), ("lowest", 1, False, "none", "lo
          ("lowest", 2, True, "none", "lowest"), ("lowest", 1, False, "last", "lowest"),
          ("exact", 1, False, "last", "lowest"), ("lowest", 2, True, "last", "lowest"),
          ("lowest", 1, False, "last", "tactics"), ("lowest", 1, False, "none", "tactics"),
-         ("lowest", 2, True, "last", "tactics")]
+         ("lowest", 2, True, "last", "tactics"), ("lowest", 1, False, "last", "net"),
+         ("lowest", 1, False, "none", "net"), ("lowest", 2, True, "last", "net")]
+
+
+def _net(hidden, bits, seed):
+    import torch
+
+    from harness.integer_net import IntegerNet
+    from harness.learned_default import Net, quantized
+
+    torch.manual_seed(seed)
+    return IntegerNet({k: v.tolist() for k, v in quantized(Net(147, hidden, 7), bits).state_dict().items()}, bits)
+
+
+NETS = [_net(32, 4, 0), _net(5, 3, 1)]
+
+
+def _facts(i, ties, depth, forcing, unlevelled, order):
+    """The rule's facts for the i-th position — under the net order the two nets in turn, so the C walk's net is
+    replaced between walks."""
+    return Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled, order=order,
+                 net=NETS[i % 2] if order == "net" else None)
 
 
 @pytest.mark.parametrize("ties,depth,forcing,unlevelled,order", RULES)
@@ -86,8 +107,8 @@ def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions,
                                                                       unlevelled, order):
     rng = random.Random(7)
     checked = 0
-    for s in positions:
-        facts = Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled, order=order)
+    for i, s in enumerate(positions):
+        facts = _facts(i, ties, depth, forcing, unlevelled, order)
         for levels in _maps(facts, s, rng):
             assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
             checked += 1
@@ -151,8 +172,8 @@ def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positi
     from harness.steady_state import verify as python_verify
 
     rng = random.Random(9)
-    for s in positions:
-        facts = Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled, order=order)
+    for i, s in enumerate(positions):
+        facts = _facts(i, ties, depth, forcing, unlevelled, order)
         empty = facts.empty_cells(s)
         for levels in ({}, {c: rng.randrange(8) for c in empty}, {c: 0 for c in empty},
                        {c: k for k, c in enumerate(empty[:8])}, _phased(s, empty, rng)):
@@ -249,6 +270,48 @@ def test_tactics_change_what_both_walks_find(positions):
         changed += native(plain, s, {}, 8, None, 1_000_000) != native(tactics, s, {}, 8, None, 1_000_000)
         changed += native_verify(plain, s, {}, 8) != native_verify(tactics, s, {}, 8)
     assert changed
+
+
+@pytest.mark.parametrize("net", [0, 1])
+def test_a_net_changes_what_both_walks_find(positions, net):
+    from harness.native_leaf import verify as native_verify
+
+    changed = 0
+    for s in positions:
+        plain = Facts(GAME, ties="lowest", unlevelled="last")
+        learned = Facts(GAME, ties="lowest", unlevelled="last", order="net", net=NETS[net])
+        changed += native(plain, s, {}, 8, None, 1_000_000) != native(learned, s, {}, 8, None, 1_000_000)
+        changed += native_verify(plain, s, {}, 8) != native_verify(learned, s, {}, 8)
+    assert changed
+
+
+def test_the_c_walk_refuses_a_net_not_over_connect4_s_features(positions):
+    from harness.integer_net import IntegerNet
+
+    other = IntegerNet({"layers.0.weight": [[1.0] * 54], "layers.0.bias": [0.0], "layers.2.weight": [[1.0]] * 7,
+                        "layers.2.bias": [0.0] * 7}, 4)
+    facts = Facts(GAME, ties="lowest", unlevelled="last", order="net", net=other)
+    with pytest.raises(ValueError, match="Connect-4 nets"):
+        native(facts, positions[0], {}, 8, None, 1_000_000)
+
+
+def test_both_walks_order_moves_by_net_scores_past_64_bits(positions):
+    """A net whose output bias alone puts column 0 past 2**63 and column 1 just under it: a walk scoring in 64 bits
+    would wrap column 0 negative and play column 1 first, so only exact scores keep the two walks together."""
+    from harness.integer_net import IntegerNet
+
+    first = [0.0] * 147
+    first[0] = 7 * 2.0 ** -40
+    bias = 1_300_001 * 2.0 ** -30
+    net = IntegerNet({"layers.0.weight": [first], "layers.0.bias": [0.0], "layers.2.weight": [[0.0]] * 7,
+                      "layers.2.bias": [7 * bias, 6 * bias, 0.0, 0.0, 0.0, 0.0, 0.0]}, 4)
+    scores = net.scores([0] * 147)
+    assert scores[1] < 2 ** 63 <= scores[0] < 2 ** 64
+    rng = random.Random(11)
+    for s in positions:
+        facts = Facts(GAME, ties="lowest", unlevelled="last", order="net", net=net)
+        for levels in _maps(facts, s, rng):
+            assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
 
 
 def test_both_walks_play_a_win_in_two_over_a_lower_move():

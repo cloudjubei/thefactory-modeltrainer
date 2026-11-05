@@ -8,6 +8,7 @@ import time
 import pytest
 
 from games.tictactoe import TicTacToe, TTTState
+from harness.reference_coding import code_bits, walk_leaves
 from harness.steady_search import find_steady_state
 from harness.steady_state import SWITCH, Facts, phase_cell, verify
 from harness.strategy_builder import Builder, check
@@ -48,11 +49,11 @@ def _sat(facts):
 
 
 def _builder(min_leaf_depth=0, seconds=60.0, search=None, accept=None, budgets=None, verifier=verify,
-             by_size=False):
+             by_size=False, root_move=None):
     facts = Facts(GAME)
     return Builder(facts, _winning, search or _sat(facts), n_levels=2, level_bits=3, cap=100_000,
                    min_leaf_depth=min_leaf_depth, reuse_window=50, seconds=seconds, accept=accept, budgets=budgets,
-                   verifier=verifier, choose_by_size=by_size)
+                   verifier=verifier, choose_by_size=by_size, root_move=root_move)
 
 
 def test_a_searched_leaf_at_the_root_is_the_whole_strategy():
@@ -145,6 +146,44 @@ def test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbere
     assert sorted(_winning([root])[0]) == [2, 4, 6]
     b = _builder(min_leaf_depth=99)
     assert b.build(root) and b.nodes[GAME.state_key(root)] == {"move": 4}
+
+
+def test_a_root_move_is_played_at_the_root_in_place_of_the_rule_s():
+    root = _ttt((0,), (5,))
+    for move in (2, 6):
+        b = _builder(min_leaf_depth=99, root_move=move)
+        assert b.build(root) and b.nodes[GAME.state_key(root)] == {"move": move}
+        assert check(b.facts, root, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_a_root_move_makes_the_root_a_move_where_it_would_be_a_leaf():
+    b = _builder(root_move=4)
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}
+    assert check(b.facts, FORK, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_below_the_root_the_rule_chooses_as_without_a_root_move():
+    root = _ttt((4,), (1,))
+    forced = _builder(min_leaf_depth=99, root_move=5)
+    assert forced.build(root)
+    plain = _builder(min_leaf_depth=99)
+    after = GAME.step(root, 5)
+    for c in (GAME.step(after, a) for a in GAME.legal_actions(after)):
+        if not c.done:
+            assert plain.build(c, 2)
+    del forced.nodes[GAME.state_key(root)]
+    assert forced.nodes == plain.nodes and any("move" in n for n in plain.nodes.values())
+
+
+def test_a_position_below_the_root_where_the_root_move_wins_is_still_the_rule_s():
+    s = _ttt((0,), (5,))
+    b = _builder(min_leaf_depth=99, root_move=6)
+    assert 6 in _winning([s])[0] and b.build(s, 2) and b.nodes[GAME.state_key(s)] == {"move": 4}
+
+
+def test_a_root_move_that_does_not_win_is_refused():
+    with pytest.raises(ValueError, match="root move 0 does not win"):
+        _builder(min_leaf_depth=99, root_move=0).build(_ttt((8,), (5,)))
 
 
 def test_check_walks_every_reply_not_just_the_first():
@@ -809,3 +848,71 @@ def test_with_phases_every_map_the_build_pays_for_carries_a_flag_bit():
                 seconds=60.0, library=[({6: 0}, 4)], phases=True)
     assert b.build(FORK) and b.bits()["map_bits"] == 5 + 3 + 1 and b.bits()["nodes"] == 1 + 2 + 5 + 3 + 1
 
+
+
+def _coded_by(refs, min_leaf_depth=2, **kw):
+    facts = Facts(GAME)
+    return Builder(facts, _winning, kw.pop("search", None) or _sat(facts), n_levels=2, level_bits=3, cap=100_000,
+                   min_leaf_depth=min_leaf_depth, reuse_window=50, seconds=60.0, refs=refs, **kw)
+
+
+def test_by_first_use_the_builder_counts_references_as_the_judges_do():
+    """EARLY splits at the root into six leaves, five trivial and one on the build's own map: the same strategy as
+    under the fixed code, its references coded as harness.floor_g1._coded codes a finished build's."""
+    fixed, first = _coded_by("fixed"), _coded_by("first_use")
+    assert fixed.build(EARLY) and first.build(EARLY) and first.nodes == fixed.nodes
+    refs = walk_leaves(GAME, EARLY, first.nodes)
+    assert refs == [0, 0, 0, 1, 0, 0]
+    assert first.bits() == {**fixed.bits(), "nodes": fixed.bits()["nodes"] - code_bits("fixed", refs, 2, 0)
+                            + code_bits("first_use", refs, 2, 0)}
+    assert (fixed.bits()["nodes"], first.bits()["nodes"]) == (25, 25 - 6 + 3 + 3 + 1 + 1 + 3 + 3 + 1)
+
+
+def test_by_first_use_library_references_name_the_library_maps_played():
+    b = _coded_by("first_use", min_leaf_depth=0, library=[({4: 0, 8: 1}, 5), ({6: 0}, 4)],
+                  search=lambda s, start, seconds: pytest.fail("searched"))
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"leaf": 1}
+    assert b.bits()["nodes"] == 1 + code_bits("first_use", [1], 3, 2) == 1 + 3 + 2 + 3
+
+
+def test_by_first_use_a_build_s_own_map_after_the_library_is_read_as_new_not_named_from_it():
+    b = _coded_by("first_use", min_leaf_depth=0, library=[({6: 0}, 4)], search=_found({4: 0}))
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"leaf": 2}
+    assert b.bits()["nodes"] == 1 + code_bits("first_use", [2], 3, 1) + 5 + 3 == 1 + 1 + 1 + 8
+
+
+def test_by_first_use_a_strategy_still_being_built_counts_the_leaves_it_has():
+    b = _coded_by("first_use")
+    assert b.build(EARLY)
+    first = next(k for k, n in b.nodes.items() if n.get("leaf") == 0)
+    whole = b.bits()["nodes"]
+    del b.nodes[first]
+    assert b.bits()["nodes"] == whole - 1 - code_bits("first_use", [0, 0, 0, 1, 0, 0], 2, 0) + code_bits(
+        "first_use", [0, 0, 1, 0, 0], 2, 0)
+
+
+def test_by_first_use_an_own_map_no_leaf_plays_costs_its_bits_and_no_reference():
+    b = _coded_by("first_use")
+    assert b.build(EARLY)
+    before = b.bits()
+    b.maps.insert(1, {2: 0})
+    b.map_empty.insert(1, 5)
+    b.nodes = {k: {**n, "leaf": 2} if n.get("leaf") == 1 else n for k, n in b.nodes.items()}
+    assert b.bits() == {**before, "nodes": before["nodes"] + 5 + 3, "maps": 2, "map_bits": before["map_bits"] + 8}
+
+
+def test_by_first_use_the_choice_between_a_leaf_and_its_split_is_made_in_the_judges_code():
+    """FORK's leaf on its own map {5: 1} against the split's move and four trivial leaves: by the fixed code 14 bits
+    against 9 (test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept) — by first_use
+    the leaf names one new map (2 bits) and the split four plays of the empty map (9 bits): 15 against 18."""
+    b = _coded_by("first_use", min_leaf_depth=0, search=_excepted(levels={5: 1}, own=1), accept=0.01,
+                  choose_by_size=True)
+    assert b.build(FORK)
+    assert b.nodes == {GAME.state_key(FORK): {"leaf": 1, "exceptions": ROOT_FIX, "own": 1, "coded": 3}}
+    assert b.bits()["nodes"] == 15
+    assert check(b.facts, FORK, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_an_unknown_reference_code_is_refused():
+    with pytest.raises(ValueError, match="fixed"):
+        _coded_by("gamma")

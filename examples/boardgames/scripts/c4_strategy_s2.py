@@ -22,8 +22,12 @@ several safe moves, those leaving the opponent at most one reply that stops an i
 are (off by default; harness.floor_l4), and "unlevelled" whether the safe moves on cells a map leaves without a
 level are passed over ("none", the default) or read as a last level ("last"; harness.floor_l5), and "order"
 which move a deciding level holding several plays ("lowest", the default, or "tactics" — first a move that wins by
-force in two, then one that does not lose by force in two; harness.floor_l6), and "phases" whether a map may switch
-to second levels from a number of stones on (off by default; harness.floor_k1).
+force in two, then one that does not lose by force in two; harness.floor_l6 — or "net" — the one the quantized net
+saved in the evidence file the builder's "net" names scores highest, harness.integer_net; harness.floor_n2), and
+"phases" whether a map may switch to second levels from a number of stones on (off by default; harness.floor_k1),
+and "refs" the code the builder counts its references in when it chooses by size ("fixed", the default, or
+"first_use", the judges' code; harness.floor_r2). A SPEC's "root_moves" ([[index, move], ...]) builds each named
+root once per move listed, that move played at the root (the builder's root_move; harness.floor_e3).
 A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
@@ -46,28 +50,43 @@ import random
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 POSITIONS = ROOT / "evidence" / "c49_frontier_positions.json.gz"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
-MEASUREMENT_MODULES = ("scripts/c4_strategy_s2.py", "harness/strategy_builder.py", "harness/steady_state.py",
+MEASUREMENT_MODULES = ("scripts/c4_strategy_s2.py", "harness/strategy_builder.py", "harness/mirror_builder.py",
+                       "scripts/c4_mirror_sharing.py", "harness/steady_state.py",
                        "harness/steady_search.py", "harness/certify.py", "harness/c4_oracle.py",
                        "harness/native_solver.py",
                        "harness/native_build.py", "scripts/c4_steady_states.py", "harness/steady_local.py",
                        "harness/steady_exceptions.py", "harness/winning_cache.py", "harness/exception_coding.py",
-                       "harness/opening.py", "harness/native_leaf.py")
+                       "harness/opening.py", "harness/native_leaf.py", "harness/integer_net.py")
 C_SOURCES = ("harness/c4leafwalk.c", "harness/c4solver.c")
+
+
+def _net(builder: dict):
+    """The quantized net the builder's "net" names (an evidence file holding its weights), or None."""
+    from harness.evidence import load_evidence
+    from harness.integer_net import IntegerNet
+
+    if "net" not in builder:
+        return None
+    saved = load_evidence(ROOT / "evidence" / builder["net"])
+    return IntegerNet(saved["weights"], saved["net"]["weight_bits"])
 
 
 def build_one(job: dict) -> dict:
     import sys
 
     sys.path.insert(0, str(ROOT / "scripts"))
+    from c4_mirror_sharing import _grid_symmetries
     from c4_steady_states import _value, _winning
 
-    from games.connect4 import C4State, Connect4
+    from games.connect4 import COLS, ROWS, C4State, Connect4
     from harness.certify import certify
+    from harness.mirror_builder import MirrorBuilder, board_image, mirror_check, mirrored_move
     from harness.native_leaf import needed as native_walk, verify as native_verify
     from harness.steady_exceptions import choose_with, needed
     from harness.steady_local import local_search
@@ -80,7 +99,7 @@ def build_one(job: dict) -> dict:
     root = C4State(tuple(job["board"]), job["to_move"], None, False)
     facts = Facts(game, ties=job["builder"].get("ties", "exact"), safe_depth=job["builder"].get("safe_depth", 1),
                   forcing=job["builder"].get("forcing", False), unlevelled=job["builder"].get("unlevelled", "none"),
-                  order=job["builder"].get("order", "lowest"))
+                  order=job["builder"].get("order", "lowest"), net=_net(job["builder"]))
     b, s = job["builder"], job["search"]
     if s.get("kind") == "local":
         winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
@@ -103,9 +122,12 @@ def build_one(job: dict) -> dict:
             r = find_steady_state(facts, st, winning, b["n_levels"], **budget)
             return {"levels": r["levels"], "exceptions": {}, "own_positions": None} if r["status"] == "found" else None
     library = [({int(c): k for c, k in levels.items()}, empty) for levels, empty in job.get("library", [])]
-    builder = Builder(facts, winning, search, b["n_levels"], b["level_bits"], b["cap"], b["min_leaf_depth"],
-                      b["reuse_window"], b["seconds"], b.get("accept"), b.get("budgets"), library, verifier,
-                      choose_by_size=b.get("choose_by_size", False), phases=b.get("phases", False))
+    mirror = _grid_symmetries(ROWS, COLS)["flip_columns"] if b.get("mirror") else None
+    make = partial(MirrorBuilder, cells=mirror) if mirror else Builder
+    builder = make(facts, winning, search, b["n_levels"], b["level_bits"], b["cap"], b["min_leaf_depth"],
+                   b["reuse_window"], b["seconds"], b.get("accept"), b.get("budgets"), library, verifier,
+                   choose_by_size=b.get("choose_by_size", False), phases=b.get("phases", False),
+                   refs=b.get("refs", "fixed"), root_move=job.get("root_move"))
     t0 = time.time()
     complete = builder.build(root)
     improved = None
@@ -121,7 +143,8 @@ def build_one(job: dict) -> dict:
             improved["lookahead_bits"] = builder.bits()["nodes"]
             improved["research"] = builder.research(b["research"])
             improved["again"] = builder.improve(lookahead=True)
-    row = {"index": job["index"], "board": job["board"], "to_move": job["to_move"], "complete": complete,
+    row = {"index": job["index"], "root_move": job.get("root_move"), "board": job["board"],
+           "to_move": job["to_move"], "complete": complete,
            "build_seconds": round(time.time() - t0, 1), "searches": builder.searches, "bits": builder.bits(),
            "improved": improved,
            "shared": builder.shared,
@@ -132,7 +155,8 @@ def build_one(job: dict) -> dict:
     if not complete:
         return {**row, "own_positions": None, "checked": None, "moves_win": None, "leaves_certified": None}
     t1 = time.time()
-    walk = check(facts, root, builder.nodes, builder.maps, b["n_levels"], b["cap"])
+    walk = (mirror_check(facts, root, builder.nodes, builder.maps, b["n_levels"], b["cap"], mirror, builder.mirrored)
+            if mirror else check(facts, root, builder.nodes, builder.maps, b["n_levels"], b["cap"]))
     states = {k: C4State(k[0], k[1], None, False) for k in builder.nodes}
     moves = [(states[k], n["move"]) for k, n in builder.nodes.items() if "move" in n]
     moves_win = all(m in w for (st, m), w in zip(moves, winning([st for st, _ in moves])))
@@ -140,11 +164,14 @@ def build_one(job: dict) -> dict:
     for k, n in builder.nodes.items():
         if "leaf" in n and (n["leaf"] != 0 or n.get("exceptions")):
             st = states[k]
-            levels = restrict(builder.maps[n["leaf"]], facts.empty_cells(st))
-            exc = n.get("exceptions", {})
-            cert = certify(game, st, 0, lambda xs, lv=levels, ex=exc: [choose_with(facts, x, lv, b["n_levels"], ex)
-                                                                        for x in xs],
-                           lambda x: _value(game, x), root_value=1)
+            if mirror and 1 <= n["leaf"] <= builder.mirrored:
+                levels = restrict(builder.maps[n["leaf"]], facts.empty_cells(board_image(mirror)(st)))
+                pick = lambda xs, lv=levels: [mirrored_move(facts, mirror, x, lv, b["n_levels"]) for x in xs]
+            else:
+                levels = restrict(builder.maps[n["leaf"]], facts.empty_cells(st))
+                exc = n.get("exceptions", {})
+                pick = lambda xs, lv=levels, ex=exc: [choose_with(facts, x, lv, b["n_levels"], ex) for x in xs]
+            cert = certify(game, st, 0, pick, lambda x: _value(game, x), root_value=1)
             certified = certified and bool(cert["certified"] and cert["complete_game"])
     kinds = {"trivial": 0, "mapped": 0, "excepted": 0}
     for n in builder.nodes.values():
@@ -235,12 +262,15 @@ def main() -> None:
     builder = {**SPEC["builder"], **({"seconds": args.seconds} if args.seconds is not None else {})}
     jobs = [{"index": i, "board": rows[i]["board"], "to_move": rows[i]["to_move"], "builder": builder,
              "search": SPEC["search"]} for i in picked]
+    if SPEC.get("root_moves") is not None:
+        by_index = {j["index"]: j for j in jobs}
+        jobs = [{**by_index[i], "root_move": m} for i, m in SPEC["root_moves"]]
     print(f"{len(jobs)} roots ({'pilot' if args.pilot else 'registered'}): {picked}", flush=True)
     progress = Path(args.progress)
     results = json.loads(progress.read_text())["roots"] if args.resume and progress.exists() else []
     resumed = len(results)
-    done = {r["index"] for r in results}
-    todo = [j for j in jobs if j["index"] not in done]
+    done = {(r["index"], r.get("root_move")) for r in results}
+    todo = [j for j in jobs if (j["index"], j.get("root_move")) not in done]
     size = SPEC.get("wave_size") or len(todo) or 1
     earlier = load_evidence(ROOT / "evidence" / SPEC["library_from"])["roots"] if SPEC.get("library_from") else []
     library: list = [m for r in earlier for m in r["found_maps"]]
@@ -256,8 +286,8 @@ def main() -> None:
                 partial = progress.with_suffix(progress.suffix + ".tmp")
                 partial.write_text(json.dumps({"roots": results}))
                 partial.replace(progress)
-                print(f"root #{r['index']}: complete {r['complete']}, bits {r['bits']}, searches {r['searches']}, "
-                      f"library {r['shared']} maps / {r['library_leaves']} leaves, own positions "
+                print(f"root #{r['index']} move {r['root_move']}: complete {r['complete']}, bits {r['bits']}, "
+                      f"searches {r['searches']}, library {r['shared']} maps / {r['library_leaves']} leaves, own positions "
                       f"{r['own_positions']}, checked {r['checked']}, moves win {r['moves_win']}, "
                       f"leaves certified {r['leaves_certified']}, build {r['build_seconds']}s", flush=True)
         if SPEC.get("wave_size"):

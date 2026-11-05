@@ -1,0 +1,257 @@
+{
+  "file": "harness/mirror_builder.py",
+  "tests": ["tests/test_mirror_builder.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "image keeps the board",
+      "old": "board[cells[i]] = v",
+      "new": "board[i] = v"
+    },
+    {
+      "name": "mirrored move not mirrored back",
+      "old": "target = cells[facts.placed_cell(image, move)]",
+      "new": "target = facts.placed_cell(image, move)"
+    },
+    {
+      "name": "mirrored move read plainly",
+      "old": "move = choose(facts, image, levels, n_levels)",
+      "new": "move = choose(facts, state, levels, n_levels)"
+    },
+    {
+      "name": "no rule no None",
+      "old": "    if move is None:\n        return None\n    target",
+      "new": "    target"
+    },
+    {
+      "name": "mirrored half empty",
+      "old": "self.image, self.mirrored = board_image(cells), self.shared // 2",
+      "new": "self.image, self.mirrored = board_image(cells), 0"
+    },
+    {
+      "name": "whole library mirrored",
+      "old": "self.image, self.mirrored = board_image(cells), self.shared // 2",
+      "new": "self.image, self.mirrored = board_image(cells), self.shared"
+    },
+    {
+      "name": "empty map read mirrored",
+      "old": "read = image if 1 <= i <= self.mirrored else state",
+      "new": "read = image if i <= self.mirrored else state"
+    },
+    {
+      "name": "every reading plain",
+      "old": "read = image if 1 <= i <= self.mirrored else state",
+      "new": "read = state"
+    },
+    {
+      "name": "mirrored readings tried on the plain cells",
+      "old": "levels = restrict(self.maps[i], self.facts.empty_cells(read))",
+      "new": "levels = restrict(self.maps[i], self.facts.empty_cells(state))"
+    },
+    {
+      "name": "oldest first",
+      "old": "for i in [0, *recent]:",
+      "new": "for i in [0, *reversed(recent)]:"
+    },
+    {
+      "name": "window ignored",
+      "old": "max(0, len(self.maps) - 1 - self.reuse_window), -1)",
+      "new": "0, -1)"
+    },
+    {
+      "name": "walk: lost line passes",
+      "old": "                return {\"won\": False, \"reason\": \"lost line\", \"own\": own}",
+      "new": "                continue"
+    },
+    {
+      "name": "walk: cap ignored",
+      "old": "        if len(own) > cap:\n            return {\"won\": False, \"reason\": \"cap\", \"own\": own}\n",
+      "new": ""
+    },
+    {
+      "name": "walk: cap off by one",
+      "old": "if len(own) > cap:",
+      "new": "if len(own) > cap + 1:"
+    },
+    {
+      "name": "walk: undefined not reported",
+      "old": "return {\"won\": False, \"reason\": \"undefined\", \"own\": own}",
+      "new": "return {\"won\": True, \"reason\": None, \"own\": own}"
+    },
+    {
+      "name": "walk: replies unwalked",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))\n            continue\n        own.add(key)\n        if len(own) > cap:",
+      "new": "            continue\n        own.add(key)\n        if len(own) > cap:"
+    },
+    {
+      "name": "check: mirrored leaf unwalked",
+      "old": "            if not walk[\"won\"]:\n                return {\"won\": False, \"reason\": f\"leaf {walk['reason']}\", \"own_positions\": len(own)}\n            own.update(walk[\"own\"])",
+      "new": "            own.update(walk[\"own\"])"
+    },
+    {
+      "name": "check: mirrored leaf's positions uncounted",
+      "old": "            own.update(walk[\"own\"])\n",
+      "new": ""
+    },
+    {
+      "name": "check: mirrored range from the empty map",
+      "old": "if 1 <= node[\"leaf\"] <= mirrored:",
+      "new": "if node[\"leaf\"] <= mirrored:"
+    },
+    {
+      "name": "check: mirrored leaves plain",
+      "old": "if 1 <= node[\"leaf\"] <= mirrored:",
+      "new": "if False:"
+    },
+    {
+      "name": "check: plain leaves mirrored",
+      "old": "if 1 <= node[\"leaf\"] <= mirrored:",
+      "new": "if 1 <= node[\"leaf\"]:"
+    },
+    {
+      "name": "check: mirrored cells plain",
+      "old": "levels = restrict(maps[node[\"leaf\"]], facts.empty_cells(image(s)))\n            walk",
+      "new": "levels = restrict(maps[node[\"leaf\"]], facts.empty_cells(s))\n            walk"
+    },
+    {
+      "name": "check: plain leaf unverified",
+      "old": "        walk = verify_with(facts, s, levels, n_levels, exc, cap)\n        if not walk[\"won\"]:\n            return {\"won\": False, \"reason\": f\"leaf {walk['reason']}\", \"own_positions\": len(own)}\n",
+      "new": ""
+    },
+    {
+      "name": "check: plain leaf's positions uncounted",
+      "old": "        own.update(_own_under(facts, s, levels, n_levels, exc))\n",
+      "new": ""
+    },
+    {
+      "name": "check: lost line passes",
+      "old": "                return {\"won\": False, \"reason\": \"lost line\", \"own_positions\": len(own)}",
+      "new": "                continue"
+    },
+    {
+      "name": "check: missing node passes",
+      "old": "            return {\"won\": False, \"reason\": \"missing node\", \"own_positions\": len(own)}",
+      "new": "            continue"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-04T14:21:37+00:00",
+    "killed": 26,
+    "survived": [],
+    "killed_by": {
+      "image keeps the board": [
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_is_walked_with_the_cells_empty_on_the_image",
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check",
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_a_plain_leaf_is_checked_plainly",
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line",
+        "test_the_first_half_of_the_library_reads_mirrored",
+        "test_the_fixtures_win_on_the_boards_they_are_said_to",
+        "test_the_image_flips_the_board_and_keeps_the_rest",
+        "test_the_scan_stops_at_the_reuse_window",
+        "test_the_second_half_reads_plainly"
+      ],
+      "mirrored move not mirrored back": [
+        "test_a_build_with_a_mirrored_leaf_passes_the_check",
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check",
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_a_mirrored_move_is_the_image_of_the_move_the_rule_plays_on_the_image",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "mirrored move read plainly": [
+        "test_a_build_with_a_mirrored_leaf_passes_the_check",
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "no rule no None": [
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_a_mirrored_leaf_where_the_rule_has_no_move_fails_the_check",
+        "test_a_mirrored_move_where_the_rule_has_none_is_none"
+      ],
+      "mirrored half empty": [
+        "test_a_build_with_a_mirrored_leaf_passes_the_check",
+        "test_half_the_library_reads_mirrored[library1-1]",
+        "test_half_the_library_reads_mirrored[library2-2]",
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly",
+        "test_the_first_half_of_the_library_reads_mirrored",
+        "test_the_scan_stops_at_the_reuse_window"
+      ],
+      "whole library mirrored": [
+        "test_a_build_with_a_mirrored_leaf_passes_the_check",
+        "test_half_the_library_reads_mirrored[library1-1]",
+        "test_half_the_library_reads_mirrored[library2-2]",
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly",
+        "test_the_first_half_of_the_library_reads_mirrored",
+        "test_the_scan_stops_at_the_reuse_window",
+        "test_the_second_half_reads_plainly"
+      ],
+      "empty map read mirrored": ["test_the_empty_map_and_the_build_s_own_maps_read_plainly"],
+      "every reading plain": [
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly",
+        "test_the_first_half_of_the_library_reads_mirrored",
+        "test_the_scan_stops_at_the_reuse_window"
+      ],
+      "mirrored readings tried on the plain cells": [
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly"
+      ],
+      "oldest first": [
+        "test_a_map_that_wins_both_ways_is_read_plainly",
+        "test_every_map_read_plainly_comes_before_any_read_mirrored",
+        "test_the_empty_map_and_the_build_s_own_maps_read_plainly"
+      ],
+      "window ignored": ["test_the_scan_stops_at_the_reuse_window"],
+      "walk: lost line passes": [
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "walk: cap ignored": ["test_a_mirrored_leaf_past_the_cap_fails_the_check"],
+      "walk: cap off by one": ["test_a_mirrored_leaf_past_the_cap_fails_the_check"],
+      "walk: undefined not reported": [
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_a_mirrored_leaf_where_the_rule_has_no_move_fails_the_check"
+      ],
+      "walk: replies unwalked": [
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "check: mirrored leaf unwalked": [
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check",
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_a_mirrored_leaf_where_the_rule_has_no_move_fails_the_check",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "check: mirrored leaf's positions uncounted": [
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check"
+      ],
+      "check: mirrored range from the empty map": [
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "check: mirrored leaves plain": [
+        "test_a_build_with_a_mirrored_leaf_passes_the_check",
+        "test_a_mirrored_leaf_checks_on_the_real_board",
+        "test_a_mirrored_leaf_is_walked_with_the_cells_empty_on_the_image",
+        "test_a_mirrored_leaf_past_the_cap_fails_the_check",
+        "test_a_mirrored_leaf_that_does_not_win_fails_the_check",
+        "test_the_empty_map_is_read_plainly_and_a_mirrored_reading_can_lose_a_line"
+      ],
+      "check: plain leaves mirrored": [
+        "test_a_plain_leaf_is_checked_plainly",
+        "test_the_check_counts_a_plain_leaf_s_positions_as_the_plain_check_does"
+      ],
+      "check: mirrored cells plain": [
+        "test_a_mirrored_leaf_is_walked_with_the_cells_empty_on_the_image"
+      ],
+      "check: plain leaf unverified": ["test_a_plain_leaf_is_checked_plainly"],
+      "check: plain leaf's positions uncounted": [
+        "test_the_check_counts_a_plain_leaf_s_positions_as_the_plain_check_does"
+      ],
+      "check: lost line passes": ["test_a_table_move_that_loses_fails_the_check"],
+      "check: missing node passes": ["test_the_check_plays_table_moves_and_finds_missing_nodes"]
+    }
+  }
+}
