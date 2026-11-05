@@ -11,7 +11,6 @@ when the game takes 101/100 of 166,623 or more with the mirror off, refuted at 4
 falls back to the bigger piece it stands in for, so it can refute and cannot support."""
 from __future__ import annotations
 
-from harness.floor_g4 import _key
 from harness.floor_w1 import _integrity
 from harness.floor_w6 import w6_report
 from harness.floor_x3 import SPEC as X3, x3_size
@@ -34,8 +33,7 @@ def x4_size(e: dict, x3: tuple, x2: tuple, z: tuple, earlier: list, g4: tuple, g
     proves the earlier runs."""
     x3_run, x3_spec = x3
     rows = {r["index"]: r for r in e["roots"]}
-    at = {r["index"]: _key(r) for r in x3_run["roots"]}
-    if (_integrity(e, spec) or sorted(rows) != spec["indices"] or any(_key(r) != at.get(i) for i, r in rows.items())
+    if (_integrity(e, spec) or sorted(rows) != spec["indices"]
             or any(_mirrored(r) for r in e["roots"] if r["complete"])):
         return {"verdict": "not_run"}
     judged = (x2, z, earlier, g4, g3, assembly, x3_spec)

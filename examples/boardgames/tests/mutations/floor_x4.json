@@ -1,0 +1,154 @@
+{
+  "file": "harness/floor_x4.py",
+  "tests": ["tests/test_floor_x4.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "own integrity unchecked",
+      "old": "if (_integrity(e, spec) or sorted(rows) != spec[\"indices\"]\n",
+      "new": "if (sorted(rows) != spec[\"indices\"]\n"
+    },
+    {
+      "name": "rows unchecked",
+      "old": "if (_integrity(e, spec) or sorted(rows) != spec[\"indices\"]\n",
+      "new": "if (_integrity(e, spec)\n"
+    },
+    {
+      "name": "mirrored leaves unchecked",
+      "old": "\n            or any(_mirrored(r) for r in e[\"roots\"] if r[\"complete\"])):",
+      "new": "):"
+    },
+    {
+      "name": "an unfinished rebuild's leaves count",
+      "old": "for r in e[\"roots\"] if r[\"complete\"])):",
+      "new": "for r in e[\"roots\"])):"
+    },
+    {
+      "name": "last mirrored id missed",
+      "old": "<= r[\"shared\"] // 2",
+      "new": "< r[\"shared\"] // 2"
+    },
+    {
+      "name": "first plain id mirrored",
+      "old": "<= r[\"shared\"] // 2",
+      "new": "<= r[\"shared\"] // 2 + 1"
+    },
+    {
+      "name": "first mirrored id missed",
+      "old": "any(1 <= n.get",
+      "new": "any(2 <= n.get"
+    },
+    {
+      "name": "rows not swapped in",
+      "old": "\"roots\": [rows.get(r[\"index\"], r) for r in x3_run[\"roots\"]]",
+      "new": "\"roots\": x3_run[\"roots\"]"
+    },
+    {
+      "name": "control taken from the swapped game",
+      "old": "control = x3_size(x3_run, *judged).get(\"bits\")\n    off = x3_size({**x3_run, \"roots\": [rows.get(r[\"index\"], r) for r in x3_run[\"roots\"]]}, *judged)",
+      "new": "off = x3_size({**x3_run, \"roots\": [rows.get(r[\"index\"], r) for r in x3_run[\"roots\"]]}, *judged)\n    control = off.get(\"bits\")"
+    },
+    {
+      "name": "X3's game unchecked",
+      "old": "if control != spec[\"control_bits\"] or off[\"verdict\"] == \"not_run\":",
+      "new": "if off[\"verdict\"] == \"not_run\":"
+    },
+    {
+      "name": "swapped game's refusal unchecked",
+      "old": "if control != spec[\"control_bits\"] or off[\"verdict\"] == \"not_run\":",
+      "new": "if control != spec[\"control_bits\"]:"
+    },
+    {
+      "name": "an unfinished rebuild supports",
+      "old": "\"supported\" if not unfinished and den",
+      "new": "\"supported\" if den"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "den * bits >= num * control",
+      "new": "den * bits > num * control"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "rden * bits <= rnum * control",
+      "new": "rden * bits < rnum * control"
+    },
+    {
+      "name": "support checked first",
+      "old": "(\"refuted\" if rden * bits <= rnum * control else\n               \"supported\" if not unfinished and den * bits >= num * control else \"inconclusive\")",
+      "new": "(\"supported\" if not unfinished and den * bits >= num * control else\n               \"refuted\" if rden * bits <= rnum * control else \"inconclusive\")"
+    },
+    {
+      "name": "ratio inverted",
+      "old": "\"ratio\": bits / control",
+      "new": "\"ratio\": control / bits"
+    },
+    {
+      "name": "unfinished dropped",
+      "old": "bits, unfinished = off[\"bits\"], off[\"unfinished\"]",
+      "new": "bits, unfinished = off[\"bits\"], False"
+    },
+    {
+      "name": "leaf 0 mirrored",
+      "old": "any(1 <= n.get",
+      "new": "any(0 <= n.get"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-05T18:54:42+00:00",
+    "killed": 18,
+    "survived": [],
+    "killed_by": {
+      "own integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "rows unchecked": ["test_rows_other_than_the_registered_are_not_run"],
+      "mirrored leaves unchecked": ["test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run"],
+      "an unfinished rebuild's leaves count": [
+        "test_a_mirrored_leaf_in_an_unfinished_rebuild_does_not_count"
+      ],
+      "last mirrored id missed": ["test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run"],
+      "first plain id mirrored": ["test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run"],
+      "first mirrored id missed": ["test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run"],
+      "rows not swapped in": [
+        "test_a_game_other_than_x3_s_is_not_run",
+        "test_an_unfinished_rebuild_cannot_support_but_can_refute",
+        "test_rows_off_x3_s_library_are_not_run",
+        "test_rows_other_than_the_registered_are_not_run",
+        "test_the_bars_are_inclusive",
+        "test_the_game_with_the_mirror_off_stands_in_for_x3_s_rebuilds"
+      ],
+      "control taken from the swapped game": [
+        "test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run",
+        "test_a_mirrored_leaf_in_an_unfinished_rebuild_does_not_count",
+        "test_an_unfinished_rebuild_cannot_support_but_can_refute",
+        "test_the_bars_are_inclusive",
+        "test_the_game_with_the_mirror_off_stands_in_for_x3_s_rebuilds"
+      ],
+      "X3's game unchecked": ["test_a_game_other_than_x3_s_is_not_run"],
+      "swapped game's refusal unchecked": [
+        "test_a_game_other_than_x3_s_is_not_run",
+        "test_rows_off_x3_s_library_are_not_run",
+        "test_rows_other_than_the_registered_are_not_run"
+      ],
+      "an unfinished rebuild supports": [
+        "test_an_unfinished_rebuild_cannot_support_but_can_refute"
+      ],
+      "support bar exclusive": [
+        "test_the_bars_are_inclusive",
+        "test_the_game_with_the_mirror_off_stands_in_for_x3_s_rebuilds"
+      ],
+      "refute bar exclusive": [
+        "test_an_unfinished_rebuild_cannot_support_but_can_refute",
+        "test_the_bars_are_inclusive"
+      ],
+      "support checked first": ["test_the_bars_are_inclusive"],
+      "ratio inverted": ["test_the_game_with_the_mirror_off_stands_in_for_x3_s_rebuilds"],
+      "unfinished dropped": ["test_an_unfinished_rebuild_cannot_support_but_can_refute"],
+      "leaf 0 mirrored": [
+        "test_a_control_rebuild_as_small_as_x3_s_gives_the_mirror_nothing",
+        "test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run",
+        "test_the_bars_are_inclusive",
+        "test_the_game_with_the_mirror_off_stands_in_for_x3_s_rebuilds"
+      ]
+    }
+  }
+}

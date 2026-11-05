@@ -5,12 +5,12 @@
   "mutations": [
     {
       "name": "own integrity unchecked",
-      "old": "if _integrity(e, spec) or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:",
+      "old": "if (_integrity(e, spec)\n            or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]):",
       "new": "if x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:"
     },
     {
       "name": "X2's game unchecked",
-      "old": "if _integrity(e, spec) or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:",
+      "old": "if (_integrity(e, spec)\n            or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]):",
       "new": "if _integrity(e, spec):"
     },
     {
@@ -125,7 +125,7 @@
     }
   ],
   "last_run": {
-    "at": "2026-11-05T05:52:07+00:00",
+    "at": "2026-11-05T18:54:55+00:00",
     "killed": 24,
     "survived": [],
     "killed_by": {

@@ -68,7 +68,9 @@ def test_a_control_rebuild_as_small_as_x3_s_gives_the_mirror_nothing():
 def test_a_control_rebuild_that_plays_a_mirrored_leaf_is_not_run():
     assert _size(arm=_arm(leaves=(2,)))["verdict"] == "not_run"
     assert _size(arm=_arm(leaves=(N,)))["verdict"] == "not_run"
+    assert _size(arm=_arm(leaves=(1,)))["verdict"] == "not_run"
     assert _size(arm=_arm(leaves=(N + 1,)))["verdict"] != "not_run"
+    assert _size(arm=_arm(leaves=(0,)))["verdict"] != "not_run"
 
 
 def test_a_mirrored_leaf_in_an_unfinished_rebuild_does_not_count():

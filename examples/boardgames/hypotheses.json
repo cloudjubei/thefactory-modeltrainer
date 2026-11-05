@@ -11049,6 +11049,92 @@
         "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
         "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf"
       }
+    },
+    "h371": {
+      "id": "h371",
+      "claim": "\u00a73.6 X4: the 18 ply-8 rebuilds that played a mirrored leaf in X3, rebuilt at the same positions from the same 5,196-entry list of maps with the mirror off (G4's builder, 2-hour cap) \u2014 all 18 complete (16 or fewer refutes).",
+      "mode": "test",
+      "proof": "tests/test_c49_x4_evidence.py::test_c49_x4_all_18_rebuilds_complete",
+      "note": "",
+      "registered_at": "2026-11-05T18:55:39.052537+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_x4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_x4_evidence.py": "724f1da72a9c769a1a9fc23d00f4c1a7f6dc2a349d04149ec701f1bf9dbd9407",
+        "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf"
+      },
+      "inconclusive_proof": "tests/test_c49_x4_evidence.py::test_c49_x4_completion_is_undecidable"
+    },
+    "h372": {
+      "id": "h372",
+      "claim": "\u00a73.6 X4: the second reading itself is worth at least 1% of the whole game at ply 8 \u2014 with X4's 18 mirror-off rebuilds in X3's place, the other 391 as X3 built them, and U1's search run again from none taken and from all taken, the whole game takes 101/100 of 166,623 bits or more (401/400 or less refutes, an unfinished rebuild cannot support).",
+      "mode": "test",
+      "proof": "tests/test_c49_x4_evidence.py::test_c49_x4_with_the_mirror_off_the_whole_game_takes_101_100_of_166_623_or_more",
+      "note": "",
+      "registered_at": "2026-11-05T18:55:40.137450+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_x4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_x4_evidence.py": "724f1da72a9c769a1a9fc23d00f4c1a7f6dc2a349d04149ec701f1bf9dbd9407",
+        "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf"
+      },
+      "inconclusive_proof": "tests/test_c49_x4_evidence.py::test_c49_x4_the_mirror_s_worth_is_undecidable"
+    },
+    "h373": {
+      "id": "h373",
+      "claim": "\u00a73.6 U2: the whole game chosen again from every certified piece the runs hold (ply 8: G3's, G4's, X3's or X4's; ply 6: any earlier build, Z1's, X2's or none), by U2's search from X3's game and from every position's smallest piece, no new builds \u2014 the whole game takes 199/200 of 166,623 bits or less (999/1000 or more refutes).",
+      "mode": "test",
+      "proof": "tests/test_c49_u2_evidence.py::test_c49_u2_the_whole_game_chosen_again_takes_199_200_of_166_623_or_less",
+      "note": "Every candidate but X4's existed at registration; the search had never been run, so its result was unseen. Only X4's evidence is declared as data.",
+      "registered_at": "2026-11-05T19:17:08.012064+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_x4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_u2_evidence.py": "6ff2660cd15b5854527c62570bc0fd1fa70405dcc1962f2eb8147473f94e0899",
+        "harness/floor_u2.py": "547fff7858b33613a46b93d42b6c0972191d337c1daa4f1e11aadc107d41a150",
+        "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf",
+        "tests/test_c49_x4_evidence.py": "724f1da72a9c769a1a9fc23d00f4c1a7f6dc2a349d04149ec701f1bf9dbd9407"
+      },
+      "inconclusive_proof": "tests/test_c49_u2_evidence.py::test_c49_u2_the_size_is_undecidable"
     }
   }
 }

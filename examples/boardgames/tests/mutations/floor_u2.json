@@ -1,0 +1,309 @@
+{
+  "file": "harness/floor_u2.py",
+  "tests": ["tests/test_floor_u2.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "X4's run unchecked",
+      "old": "if (_integrity(x4_run, x4_spec)\n            or x3_size",
+      "new": "if (x3_size"
+    },
+    {
+      "name": "X3's game unchecked",
+      "old": "if (_integrity(x4_run, x4_spec)\n            or x3_size(x3_run, x2, z, earlier, g4, g3, assembly, x3_spec).get(\"bits\") != spec[\"control_bits\"]):",
+      "new": "if _integrity(x4_run, x4_spec):"
+    },
+    {
+      "name": "G4 rows unchecked",
+      "old": "if (not all(j1_valid(r, g4_lib) for r in g4_done) or any(_mirrored",
+      "new": "if (any(_mirrored"
+    },
+    {
+      "name": "X4 mirrored unchecked",
+      "old": " or any(_mirrored(r) for r in x4_done)",
+      "new": ""
+    },
+    {
+      "name": "X4 library unchecked",
+      "old": "\n            or not all(j1_valid(r, x2_library(library)) for r in x4_done)",
+      "new": ""
+    },
+    {
+      "name": "unfinished G4 rows offered",
+      "old": "g4_done = [r for r in g4_run[\"roots\"] if r[\"complete\"]]",
+      "new": "g4_done = g4_run[\"roots\"]"
+    },
+    {
+      "name": "unfinished X4 rows offered",
+      "old": "x4_done = [r for r in x4_run[\"roots\"] if r[\"complete\"]]",
+      "new": "x4_done = x4_run[\"roots\"]"
+    },
+    {
+      "name": "no-build option missing",
+      "old": "options.setdefault(k, {})[None] = None",
+      "new": "options.setdefault(k, {})"
+    },
+    {
+      "name": "kept start missing",
+      "old": "    start.update({_key(r): \"g4\" for r in g4_run[\"roots\"] if r[\"index\"] in x3_spec[\"kept\"]})\n",
+      "new": ""
+    },
+    {
+      "name": "Z start missing",
+      "old": "    start.update({_key(r): \"z\" for r in z_run[\"roots\"] if r[\"index\"] in x3_spec[\"z_held\"]})\n",
+      "new": ""
+    },
+    {
+      "name": "X2 start missing",
+      "old": "    start.update({_key(r): \"x2\" for r in x2_run[\"roots\"] if r[\"index\"] in x3_spec[\"x2_held\"]})\n",
+      "new": ""
+    },
+    {
+      "name": "X3 start missing",
+      "old": "    start.update({_key(r): \"x3\" for r in x3_run[\"roots\"] if r[\"index\"] in spec[\"x3_held\"]})\n",
+      "new": ""
+    },
+    {
+      "name": "V2 start missing",
+      "old": "    start.update(before)\n",
+      "new": ""
+    },
+    {
+      "name": "X2 row priced unfolded",
+      "old": "((\"z\", z_run, j1_piece), (\"x2\", x2_run, x2_piece))",
+      "new": "((\"z\", z_run, j1_piece), (\"x2\", x2_run, j1_piece))"
+    },
+    {
+      "name": "X3 row priced unfolded",
+      "old": "options[_key(r)][label] = x2_piece(r, library)",
+      "new": "options[_key(r)][label] = j1_piece(r, library)"
+    },
+    {
+      "name": "Z row priced by G3's list",
+      "old": "options.setdefault(_key(r), {})[n] = j1_piece(r, assembly[\"library\"])",
+      "new": "options.setdefault(_key(r), {})[n] = j1_piece(r, library)"
+    },
+    {
+      "name": "G4 priced by the bigger list",
+      "old": "options[_key(r)][\"g4\"] = j1_piece(r, g4_lib)",
+      "new": "options[_key(r)][\"g4\"] = j1_piece(r, library)"
+    },
+    {
+      "name": "unfinished Z rows offered",
+      "old": "        for r in run[\"roots\"]:\n            if r[\"complete\"]:\n                options[_key(r)][label] = price(r, library)",
+      "new": "        for r in run[\"roots\"]:\n            if True:\n                options[_key(r)][label] = price(r, library)"
+    },
+    {
+      "name": "unfinished X3 rows offered",
+      "old": "        for r in run[\"roots\"]:\n            if r[\"complete\"]:\n                options[_key(r)][label] = x2_piece(r, library)",
+      "new": "        for r in run[\"roots\"]:\n            if True:\n                options[_key(r)][label] = x2_piece(r, library)"
+    },
+    {
+      "name": "no-piece counted as built",
+      "old": "if k in below and label is not None}",
+      "new": "if k in below}"
+    },
+    {
+      "name": "control not recomputed",
+      "old": "if game is None or game[2](game[1]) != spec[\"control_bits\"]:",
+      "new": "if game is None:"
+    },
+    {
+      "name": "smallest start dropped",
+      "old": "min((u2_choose(size, options, start), u2_choose(size, options, smallest)), key=lambda s: s[1])",
+      "new": "u2_choose(size, options, start)"
+    },
+    {
+      "name": "game start dropped",
+      "old": "min((u2_choose(size, options, start), u2_choose(size, options, smallest)), key=lambda s: s[1])",
+      "new": "u2_choose(size, options, smallest)"
+    },
+    {
+      "name": "larger start kept",
+      "old": "smallest)), key=lambda s: s[1])",
+      "new": "smallest)), key=lambda s: -s[1])"
+    },
+    {
+      "name": "support exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "ratio inverted",
+      "old": "\"ratio\": bits / control",
+      "new": "\"ratio\": control / bits"
+    },
+    {
+      "name": "changed miscounted",
+      "old": "sum(state[k] != start[k] for k in state)",
+      "new": "sum(state[k] == start[k] for k in state)"
+    },
+    {
+      "name": "ties move",
+      "old": "if trial[0] >= best:",
+      "new": "if trial[0] > best:"
+    },
+    {
+      "name": "worst move taken",
+      "old": "trial = min(((size({**state, **move}), n)",
+      "new": "trial = max(((size({**state, **move}), n)"
+    },
+    {
+      "name": "group into dropped",
+      "old": "for group in (into, out) if len(group) > 1",
+      "new": "for group in (out,) if len(group) > 1"
+    },
+    {
+      "name": "group out dropped",
+      "old": "for group in (into, out) if len(group) > 1",
+      "new": "for group in (into,) if len(group) > 1"
+    },
+    {
+      "name": "groups of one",
+      "old": "if len(group) > 1]",
+      "new": "if len(group) > 0]"
+    },
+    {
+      "name": "largest piece taken",
+      "old": "key=lambda label: pieces[label][0],",
+      "new": "key=lambda label: -pieces[label][0],"
+    },
+    {
+      "name": "none allowed in groups",
+      "old": "for label, piece in pieces.items() if piece and keep(piece)",
+      "new": "for label, piece in pieces.items() if not piece or keep(piece)"
+    },
+    {
+      "name": "single moves dropped",
+      "old": "moves = [{k: label} for k, pieces in options.items() for label in pieces if label != state[k]]",
+      "new": "moves = []"
+    },
+    {
+      "name": "group ignores the current piece",
+      "old": "if piece and m in piece[1]:\n",
+      "new": "if piece:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-05T19:02:46+00:00",
+    "killed": 37,
+    "survived": [],
+    "killed_by": {
+      "X4's run unchecked": [
+        "test_a_control_run_off_its_registration_or_reading_mirrored_is_not_run"
+      ],
+      "X3's game unchecked": ["test_a_game_other_than_x3_s_is_not_run"],
+      "G4 rows unchecked": ["test_a_g4_rebuild_off_its_library_is_not_run"],
+      "X4 mirrored unchecked": [
+        "test_a_control_run_off_its_registration_or_reading_mirrored_is_not_run"
+      ],
+      "X4 library unchecked": [
+        "test_a_control_run_off_its_registration_or_reading_mirrored_is_not_run"
+      ],
+      "unfinished G4 rows offered": ["test_an_unfinished_piece_is_no_option"],
+      "unfinished X4 rows offered": ["test_an_unfinished_piece_is_no_option"],
+      "no-build option missing": [
+        "test_every_certified_piece_is_an_option_at_its_position",
+        "test_the_bars_are_inclusive",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "kept start missing": [
+        "test_a_kept_rebuild_starts_as_g4_s_and_the_rest_as_g3_s",
+        "test_a_rebuild_z1_kept_starts_as_z1_s_and_the_other_build_as_v2_s"
+      ],
+      "Z start missing": ["test_a_rebuild_z1_kept_starts_as_z1_s_and_the_other_build_as_v2_s"],
+      "X2 start missing": [
+        "test_a_kept_rebuild_starts_as_g4_s_and_the_rest_as_g3_s",
+        "test_the_bars_are_inclusive",
+        "test_the_game_starts_as_x3_chose_it",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "X3 start missing": [
+        "test_a_kept_rebuild_starts_as_g4_s_and_the_rest_as_g3_s",
+        "test_the_bars_are_inclusive",
+        "test_the_game_starts_as_x3_chose_it",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "V2 start missing": ["test_a_rebuild_z1_kept_starts_as_z1_s_and_the_other_build_as_v2_s"],
+      "X2 row priced unfolded": ["test_a_mirror_run_s_piece_plays_its_map_whichever_way_it_reads"],
+      "X3 row priced unfolded": [
+        "test_a_mirror_run_s_piece_plays_its_map_whichever_way_it_reads",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back"
+      ],
+      "Z row priced by G3's list": ["test_an_earlier_build_s_own_map_is_no_library_map"],
+      "G4 priced by the bigger list": ["test_a_g4_rebuild_s_own_map_is_no_library_map"],
+      "unfinished Z rows offered": ["test_an_unfinished_rebuild_of_x2_s_is_no_option"],
+      "unfinished X3 rows offered": ["test_an_unfinished_piece_is_no_option"],
+      "no-piece counted as built": [
+        "test_a_game_other_than_x3_s_is_not_run",
+        "test_a_kept_rebuild_starts_as_g4_s_and_the_rest_as_g3_s",
+        "test_a_rebuild_z1_kept_starts_as_z1_s_and_the_other_build_as_v2_s",
+        "test_the_bars_are_inclusive",
+        "test_the_game_starts_as_x3_chose_it",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "control not recomputed": ["test_a_game_other_than_x3_s_is_not_run"],
+      "smallest start dropped": ["test_the_whole_game_comes_out_of_the_better_start"],
+      "game start dropped": [
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "larger start kept": ["test_the_whole_game_comes_out_of_the_better_start"],
+      "support exclusive": ["test_the_bars_are_inclusive"],
+      "refute exclusive": ["test_the_bars_are_inclusive"],
+      "ratio inverted": ["test_the_search_finds_the_smaller_pieces_g4_held_back"],
+      "changed miscounted": ["test_the_search_finds_the_smaller_pieces_g4_held_back"],
+      "ties move": ["timeout after 60s"],
+      "worst move taken": [
+        "test_a_group_move_out_takes_each_position_s_smallest_piece_without_the_map",
+        "test_a_group_move_takes_each_position_s_smallest_piece_with_the_map",
+        "test_the_best_move_is_taken_first",
+        "test_the_positions_paying_a_map_leave_it_together",
+        "test_the_positions_sharing_a_new_map_go_over_together",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "group into dropped": [
+        "test_a_group_move_takes_each_position_s_smallest_piece_with_the_map",
+        "test_the_positions_sharing_a_new_map_go_over_together"
+      ],
+      "group out dropped": [
+        "test_a_group_move_out_takes_each_position_s_smallest_piece_without_the_map",
+        "test_the_positions_paying_a_map_leave_it_together"
+      ],
+      "groups of one": ["test_a_map_played_at_one_position_is_no_group_move"],
+      "largest piece taken": [
+        "test_a_group_move_out_takes_each_position_s_smallest_piece_without_the_map",
+        "test_a_group_move_takes_each_position_s_smallest_piece_with_the_map"
+      ],
+      "none allowed in groups": [
+        "test_a_group_move_never_drops_a_position_s_piece_for_none",
+        "test_the_bars_are_inclusive",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "single moves dropped": [
+        "test_a_group_move_never_drops_a_position_s_piece_for_none",
+        "test_a_map_played_at_one_position_is_no_group_move",
+        "test_a_position_can_drop_its_piece",
+        "test_one_position_moves_to_its_smaller_piece",
+        "test_the_best_move_is_taken_first",
+        "test_the_search_finds_the_smaller_pieces_g4_held_back",
+        "test_the_whole_game_comes_out_of_the_better_start"
+      ],
+      "group ignores the current piece": [
+        "test_a_group_move_takes_each_position_s_smallest_piece_with_the_map",
+        "test_the_positions_sharing_a_new_map_go_over_together"
+      ]
+    }
+  }
+}

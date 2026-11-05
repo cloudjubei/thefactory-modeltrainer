@@ -6162,3 +6162,25 @@ best. All 409 taken gives 176,641. Four builds (#267, #269, #273, #275) ran past
 complete, since the cap ends improvement; three are taken. Parts: opening 845, library 70,101, strategies 49,038, builds
 46,639. Write-up headline now 166,623; against the references 4.0x smaller than the policy net, 1.9x larger than WeakC4
 as shipped, 3.7–4.8x larger than WeakC4 entropy-coded.
+
+X4, U2 and Z2 chosen 2026-11-05 (user's choice after X3: all three). The order is forced: Z2 rebuilds the ply-6 builds
+of whatever game U2 chooses, and U2 takes X4's rebuilds among its pieces.
+
+X4 registered 2026-11-05 (pre-registered h371, h372): the control X3 did not have. harness/floor_x4.py rebuilds the 18
+rebuilds that played a mirrored leaf, same positions, G4's builder and 2-hour cap, with the mirror off, from the same
+5,196-entry list. The plain builder scans from the end of the list, so it always finds the upper copy of a map and every
+reference costs what it cost in X3; a lower-half leaf in a control row is refused. x4_size runs pinned x3_size on X3's
+run and again with the 18 swapped in, and U1's search runs again. The other 391 stay as X3 built them, assumed to be what
+the mirror off would have built, since a mirrored reading a build did not keep leaves its strategy alone. h371: all 18
+complete (16 or fewer refutes); h372: 101/100 of 166,623 or more supports, 401/400 or less refutes. An unfinished control
+row falls back to a bigger piece, so it can refute and cannot support. 11 tests, 18/18 mutants; a survivor showed a
+position guard duplicated x3_size's and it was removed. Three fast positions dry-run through the build script: #200 took
+144.8 s against X3's 4 s, one own-map leaf, certified. X3's mutation spec was refreshed for a re-wrapped line, 24/24.
+
+X4 launched 2026-11-05 18:56Z, 7 workers, the only run.
+
+U2 designed 2026-11-05: the whole game chosen again from every certified piece the runs hold. harness/floor_u2.py: each
+position takes any piece (ply 8: G3's, G4's, X3's or X4's; ply 6: any earlier build, Z1's, X2's or none). A move changes
+one position, or moves every position that can to its smallest piece playing a map, or every position paying a map to
+its smallest piece without it; best move first. Starts from X3's game and from every position's smallest piece. 27
+tests, 37/37 mutants, twelve survivors first: two showed redundant code, removed, and ten test gaps, closed.

@@ -664,6 +664,10 @@ rule standalone and in decision-list order, by ply.
     167,046 from none. Library 70,101 bits (797 maps), strategies 49,038, builds 46,639. Most of the gain needs no
     mirrored leaf: the 18 rebuilds playing one alone give 172,678, the 391 with none alone give 169,962. No run with the
     mirror off exists, so the mirror's own share at ply 8 is unmeasured.
+  - **Next, in this order (user's choice after X3):** X4 (pre-registered h371, h372): the 18 rebuilds playing a mirrored
+    leaf rebuilt with the mirror off from the same list, launched 18:56Z. U2: the whole game chosen again from every
+    certified piece, X4's included, `harness/floor_u2.py` (37/37), no new builds. Z2: the ply-6 builds of U2's game
+    rebuilt from every map it holds, both readings; not yet designed.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);
