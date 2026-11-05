@@ -1,28 +1,31 @@
-# A certified first-player strategy for Connect-4 in 166,623 bits
+# A certified first-player strategy for Connect-4 in 165,023 bits
 
-Write-up, 2026-10-29, updated 2026-11-05 (X3). Question: how small can a complete, certified description of a winning first-player strategy for
+Write-up, 2026-10-29, updated 2026-11-05 (U2). Question: how small can a complete, certified description of a winning first-player strategy for
 Connect-4 (7×6) be, if a generic process finds it? Each claim cited as hNNN is a registered claim in
 `examples/boardgames/hypotheses.json`, with its proof test and evidence file. A claim marked *after the data* was written
-once the run had finished; every other headline claim was registered before its run started.
+once the run had finished; every other headline claim was registered before its run started, except h373, which was
+registered while X4 ran: X4's rows were unfinished and U2's search had never been run, but the register counts it as after
+the data.
 
 ---
 
 ## 1. Result
 
-1. **A certified winning strategy for the first player, from the empty board, in 166,623 bits (about 20.8 KB)** (G4, U1, Z1, X2, X3;
-   h358, h360, h363, h367, h369, h370). It is G3's whole game (280,640 bits; h324, h326) with 51 of its 148 ply-6 subtrees replaced
-   by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 44 of the 409 ply-8 strategies rebuilt from every
-   map that game holds (G4, U1; §6), 22 of the 51 ply-6 strategies rebuilt the same way (Z1; §6), and 7 ply-6 and 71
-   ply-8 strategies rebuilt with every map also readable on the mirrored board (X2, X3; §6). It plays every reply the opponent can make, and every piece passed
+1. **A certified winning strategy for the first player, from the empty board, in 165,023 bits (about 20.6 KB)** (G4, U1, Z1, X2, X3, U2;
+   h358, h360, h363, h367, h369, h373, h375). It is G3's whole game (280,640 bits; h324, h326) with 50 of its 148 ply-6 subtrees replaced
+   by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 72 of the 416 ply-8 strategies rebuilt from every
+   map that game holds (G4; §6), 25 of the 50 ply-6 strategies rebuilt the same way (Z1; §6), 10 ply-6 and 49
+   ply-8 strategies rebuilt with every map also readable on the mirrored board (X2, X3; §6), and 3 ply-8 strategies from the
+   control run with that reading off (X4; §6). U2 chose among all of those pieces at once. It plays every reply the opponent can make, and every piece passed
    an independent walk confirming that it wins every line. The assembled game, by part:
 
    | Part | Bits | Share |
    |---|---|---|
-   | Opening: 56 table moves to ply 6, 97 more at ply 6, and 233 positions the empty map already wins | 845 | 0.5% |
-   | Library: the 797 shared maps that some piece plays, each paid once | 70,101 | 42.1% |
-   | Strategies at the 409 ply-8 positions still used (44 of them G4's rebuilds, 71 X3's) | 49,038 | 29.4% |
-   | Strategies built from the 51 ply-6 positions (22 of them Z1's rebuilds, 7 X2's) | 46,639 | 28.0% |
-   | **Total** | **166,623** | |
+   | Opening: 56 table moves to ply 6, 98 more at ply 6, and 233 positions the empty map already wins | 849 | 0.5% |
+   | Library: the 807 shared maps that some piece plays, each paid once | 70,917 | 43.0% |
+   | Strategies at the 416 ply-8 positions still used (72 of them G4's rebuilds, 49 X3's, 3 X4's) | 49,604 | 30.1% |
+   | Strategies built from the 50 ply-6 positions (25 of them Z1's rebuilds, 10 X2's) | 43,653 | 26.5% |
+   | **Total** | **165,023** | |
 
 2. **Where the bits went in G3, the last whole game built in one run:**
 
@@ -40,8 +43,8 @@ once the run had finished; every other headline claim was registered before its 
    | Description | Bits | vs this result |
    |---|---|---|
    | The repo's policy net (not certified) | ~660,000 | 4.0x larger |
-   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.9x smaller |
-   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 3.7–4.8x smaller |
+   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.8x smaller |
+   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 3.7–4.7x smaller |
 
    WeakC4 uses a Connect-4-specific language (see §6, option 4). Every rule here is generic: nothing in it knows about
    gravity, columns or threats beyond "a move that wins now" and "a move that lets the opponent win now". The mirror a
@@ -50,9 +53,9 @@ once the run had finished; every other headline claim was registered before its 
    108,834 of the 176,750 strategy bits, and the largest single position takes 5,691.
 
 The evidence for G3 is `examples/boardgames/evidence/c49_g3.json.gz`, and `harness/floor_g3.py` (`g3_size`)
-recomputes its total from it. The assembled game is recomputed by `tests/test_c49_x3_evidence.py`
-(`harness/floor_x3.py`: `harness/floor_u1.py`'s local search over X3's rebuilds, on the game X2 chose) from G3 and the
-E1, O1, E3, V1, V2, G4, Z1, X2 and X3 evidence files.
+recomputes its total from it. The assembled game is recomputed by `tests/test_c49_u2_evidence.py`
+(`harness/floor_u2.py`: a local search over every certified piece, from X3's game and from every position's smallest
+piece) from G3 and the E1, O1, E3, V1, V2, G4, Z1, X2, X3 and X4 evidence files.
 
 ---
 
@@ -132,11 +135,14 @@ ply 10.
 | Z1 | The 51 ply-6 builds the game takes, rebuilt from every map it holds, chosen by the same search; 27 taken | 180,199 | 0.978 | h361–h363 |
 | X2 | The same 51 rebuilt from the same maps, every map also readable on the mirrored board; 7 taken | 175,425 | 0.974 | h364–h367 |
 | X3 | The 409 ply-8 strategies rebuilt from the same maps read both ways; 71 taken | 166,623 | 0.950 | h368–h370 |
+| U2 | No new builds: every certified piece an option at its position, X4's control rebuilds included; 49 positions change | 165,023 | 0.990 | h373, h375 |
 
 The whole-game passes stop at G3 by a rule set before it ran: pass again only while a pass gains a tenth. G4 and Z1 are
 library passes over the assembled game instead, each judged against its own 97/100 bar: G4 cleared it, Z1 fell short.
 X2 changes the language rather than the library and fell short of the same bar. X3 carries X2's change to the ply-8
-strategies and cleared it, though the rebuilds with no mirrored leaf clear it without the others (h370).
+strategies and cleared it, though the rebuilds with no mirrored leaf clear it without the others (h370). X4, the control
+for that pass, puts the second reading's own worth at ply 8 at 2,577 bits (h372, h374). U2 builds nothing and cleared its
+199/200 bar.
 
 The total compute was about 216 CPU-hours for F2, 219 for G2 and 151 for G3, on one 10-core laptop.
 
@@ -291,6 +297,18 @@ if new.
   2,888 bits to 797 maps, 70,101 bits (h370, after the data). U1's search no longer agrees from its two starts: 71 taken
   from all, 54 and 167,046 bits from none, so 166,623 is a local best. All 409 taken the game takes 176,641. Four builds
   ran past the cap, which ends improvement and leaves a build complete; three of them are taken.
+- **The mirror's own worth at ply 8 (X4, measured):** The 18 rebuilds that played a mirrored leaf, rebuilt from the same
+  list with the mirror off. All finish (h371). Put in X3's place, with U1's search run again, they give a game of 169,200
+  bits, 2,577 more than 166,623 (1.0155), past the 1% bar, so h372 is supported. The 18 take 9,279 bits against 6,677: 15
+  are larger, 3 smaller, and the game takes 8 of them against X3's 13 (h374, after the data). This holds the other 391 as
+  X3 built them, taken to be what the mirror off would have built.
+- **Every certified piece chosen at once (U2, measured):** Each earlier pass chose only among its own rebuilds. U2 lets
+  every position take any piece any run certified, and moves one position or every position sharing a map. From X3's game
+  its search stops at 165,196; from every position's smallest piece it stops at 165,023, 0.9904 of 166,623, past the 199/200
+  bar (h373). No new builds. 49 positions change, all in play: 25 of X3's 71 rebuilds leave (19 for G4's piece, 5 for G3's,
+  1 for X4's), 11 of G3's strategies go to G4's, and 7 of the 51 builds move, one to no build. Three of X4's mirror-off
+  rebuilds are taken. The library grows to 807 maps, 70,917 bits, while the builds fall to 43,653 (h375, after the data). The
+  two starts disagree, so 165,023 is again a local best.
 
 ---
 

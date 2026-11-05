@@ -6184,3 +6184,27 @@ position takes any piece (ply 8: G3's, G4's, X3's or X4's; ply 6: any earlier bu
 one position, or moves every position that can to its smallest piece playing a map, or every position paying a map to
 its smallest piece without it; best move first. Starts from X3's game and from every position's smallest piece. 27
 tests, 37/37 mutants, twelve survivors first: two showed redundant code, removed, and ten test gaps, closed.
+
+X4 result 2026-11-05 (h371, h372 supported, pre-registered; h374 after the data). 18:56Z to 20:19Z, 18/18 complete, 8.0
+build-hours against X3's 10.0 for the same rows, no build at the cap. The earlier estimate of 2.5 hours or more ran over:
+the run took 1.4 hours. With the 18 mirror-off rebuilds in X3's place and U1's search run again the game takes 169,200
+bits, 2,577 more than 166,623 (1.0155), past the 101/100 bar. Search: 68 from all, 55 and 169,493 from none. The 18 take
+9,279 bits against 6,677 with the mirror on; 15 larger, 3 smaller (#57, #86, #499); 8 taken against X3's 13.
+
+U2 result 2026-11-05 (h373 supported; h375 after the data). The register marks h373 POST-HOC because it was registered
+19:17Z, after X4 started at 18:55Z; X4's rows were unfinished and the search had never run. 165,196 from X3's game, 165,023
+from every position's smallest piece: 0.9904 of 166,623, past the 199/200 bar (165,789) by 766. 49 positions change. Parts:
+opening 849, library 70,917 (807 maps, 222 beyond G3's library, 35 of those beyond G4's), 416 strategies 49,604, 50 builds
+43,653. Write-up headline now 165,023; against the references 4.0x smaller than the policy net, 1.8x larger than WeakC4 as
+shipped, 3.7–4.7x larger than WeakC4 entropy-coded.
+
+Z2 registered 2026-11-05 (pre-registered h376, h377): the 50 builds of U2's game rebuilt, same positions and root moves,
+X2's builder and 6-hour cap with both readings, from X2's 2,598 maps plus the 163 own maps of the pieces the game plays
+that the list did not hold (harness/floor_z2.py `z2_library`; 2,761 maps, 5,522 entries read both ways). `own` names
+those pieces and the judge recomputes them from U2's game. Every complete rebuild is one more option for U2's search, from
+U2's game and from every position's smallest piece. h376: 47 of 50 complete (39 or fewer refutes); h377: 99/100 of 165,023
+or less (999/1000 or more refutes once all finished). 26 tests, 33/33 mutants; three survivors first: a filter that did
+nothing, removed, and two test gaps, closed. Dry run on the real evidence with the 50 positions as unfinished rows
+reproduced 165,023 and accepted `own` and the root moves.
+
+Z2 launched 2026-11-05, 7 workers, the only run. X2's same-sized run took 57.7 build-hours, 4.0 at most.

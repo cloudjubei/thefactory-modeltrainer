@@ -664,10 +664,15 @@ rule standalone and in decision-list order, by ply.
     167,046 from none. Library 70,101 bits (797 maps), strategies 49,038, builds 46,639. Most of the gain needs no
     mirrored leaf: the 18 rebuilds playing one alone give 172,678, the 391 with none alone give 169,962. No run with the
     mirror off exists, so the mirror's own share at ply 8 is unmeasured.
-  - **Next, in this order (user's choice after X3):** X4 (pre-registered h371, h372): the 18 rebuilds playing a mirrored
-    leaf rebuilt with the mirror off from the same list, launched 18:56Z. U2: the whole game chosen again from every
-    certified piece, X4's included, `harness/floor_u2.py` (37/37), no new builds. Z2: the ply-6 builds of U2's game
-    rebuilt from every map it holds, both readings; not yet designed.
+  - **X4 result (h371, h372 supported — pre-registered; h374 after the data): the second reading is worth 2,577 bits at
+    ply 8.** 18/18 complete, 8.0 build-hours. With the mirror off the game takes 169,200, 1.0155 of 166,623; the 18 take
+    9,279 against 6,677. The other 391 are held as X3 built them.
+  - **U2 result (h373 supported, POST-HOC by the register: registered while X4 ran, search unseen; h375 after the data):
+    the whole game takes 165,023 bits, 0.9904 of 166,623.** No new builds. 165,196 from X3's game, 165,023 from every
+    position's smallest piece. Library 70,917 (807 maps), 416 strategies 49,604, 50 builds 43,653, opening 849.
+  - **Running (user's choice after X3):** Z2 (pre-registered h376, h377): the 50 builds of U2's game rebuilt with both
+    readings from X2's maps plus the 163 own maps of the pieces the game plays, `harness/floor_z2.py` (33/33). 47 of 50
+    complete; 99/100 of 165,023 or less supports, 999/1000 or more refutes.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);

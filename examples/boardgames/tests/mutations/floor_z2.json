@@ -1,0 +1,341 @@
+{
+  "file": "harness/floor_z2.py",
+  "tests": ["tests/test_floor_z2.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "unplayed pieces count",
+      "old": " and (_key(r) in below or _key(r) in kids)]",
+      "new": "]"
+    },
+    {
+      "name": "builds not taken as played",
+      "old": "(_key(r) in below or _key(r) in kids)",
+      "new": "(_key(r) in kids)"
+    },
+    {
+      "name": "strategies not taken as played",
+      "old": "(_key(r) in below or _key(r) in kids)",
+      "new": "(_key(r) in below)"
+    },
+    {
+      "name": "held positions' kids played",
+      "old": "for k in below if state[k] is None for c",
+      "new": "for k in below for c"
+    },
+    {
+      "name": "earlier label by name",
+      "old": "(label if name == \"earlier\" else name)",
+      "new": "name"
+    },
+    {
+      "name": "library not deduped",
+      "old": " if m not in held]",
+      "new": "]"
+    },
+    {
+      "name": "library not listed",
+      "old": "held = [list(m) for m in library]",
+      "new": "held = [*library]"
+    },
+    {
+      "name": "file once",
+      "old": "return x2_library(z2_library(z1_library_from(*first), _runs(rows, g3, g4, z, x2, x3, x4), SPEC))",
+      "new": "return z2_library(z1_library_from(*first), _runs(rows, g3, g4, z, x2, x3, x4), SPEC)"
+    },
+    {
+      "name": "file sources swapped",
+      "old": "_runs(rows, g3, g4, z, x2, x3, x4), SPEC",
+      "new": "_runs(rows, g3, g4, x2, z, x3, x4), SPEC"
+    },
+    {
+      "name": "file earlier one short",
+      "old": "first[3:-1]",
+      "new": "first[3:-2]"
+    },
+    {
+      "name": "run integrity unchecked",
+      "old": "if _integrity(e, spec) or state is None:",
+      "new": "if state is None:"
+    },
+    {
+      "name": "U2 game unchecked",
+      "old": "if _integrity(e, spec) or state is None:",
+      "new": "if _integrity(e, spec):"
+    },
+    {
+      "name": "builds unchecked",
+      "old": "if (builds != spec[\"root_moves\"] or own",
+      "new": "if (own"
+    },
+    {
+      "name": "own unchecked",
+      "old": " or own != spec[\"own\"]",
+      "new": ""
+    },
+    {
+      "name": "own counts rows without maps",
+      "old": " and r[\"found_maps\"])",
+      "new": ")"
+    },
+    {
+      "name": "rank unchecked",
+      "old": " or any(rank.get(_key(r)) != r[\"index\"] for r in e[\"roots\"])",
+      "new": ""
+    },
+    {
+      "name": "rows' moves unchecked",
+      "old": "            or sorted(([r[\"index\"], r[\"root_move\"]] for r in e[\"roots\"]), key=_order) != spec[\"root_moves\"]\n",
+      "new": ""
+    },
+    {
+      "name": "played move unchecked",
+      "old": "\n            or any(r[\"root_move\"] is not None and _root_move(r) != r[\"root_move\"] for r in e[\"roots\"])):",
+      "new": "):"
+    },
+    {
+      "name": "library unchecked",
+      "old": "if not all(j1_valid(r, x2_library(library)) for r in done):",
+      "new": "if False:"
+    },
+    {
+      "name": "library once",
+      "old": "j1_valid(r, x2_library(library))",
+      "new": "j1_valid(r, library)"
+    },
+    {
+      "name": "unfinished rows judged",
+      "old": "done = [r for r in e[\"roots\"] if r[\"complete\"]]",
+      "new": "done = list(e[\"roots\"])"
+    },
+    {
+      "name": "grown maps free",
+      "old": "if i > len(assembly[\"library\"])}}",
+      "new": "if len(assembly[\"library\"]) < i <= 7}}"
+    },
+    {
+      "name": "game unmeasured",
+      "old": "if size(state) != control:",
+      "new": "if False:"
+    },
+    {
+      "name": "rebuild not offered",
+      "old": "options[_key(r)][\"z2\"] = x2_piece(r, library)",
+      "new": "pass"
+    },
+    {
+      "name": "readings not folded",
+      "old": "= x2_piece(r, library)",
+      "new": "= (x2_piece(r, library)[0], frozenset())"
+    },
+    {
+      "name": "only from the game",
+      "old": "min((u2_choose(size, options, state), u2_choose(size, options, smallest)), key=lambda s: s[1])",
+      "new": "u2_choose(size, options, state)"
+    },
+    {
+      "name": "only from the smallest",
+      "old": "min((u2_choose(size, options, state), u2_choose(size, options, smallest)), key=lambda s: s[1])",
+      "new": "u2_choose(size, options, smallest)"
+    },
+    {
+      "name": "larger start kept",
+      "old": "min((u2_choose(size, options, state)",
+      "new": "max((u2_choose(size, options, state)"
+    },
+    {
+      "name": "unfinished can refute",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "support bar strict",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "rebuilt miscounted",
+      "old": "sum(label == \"z2\" for label in chosen.values())",
+      "new": "sum(label != \"z2\" for label in chosen.values())"
+    },
+    {
+      "name": "never-built position priced",
+      "old": "if k in below and label is not None}",
+      "new": "if k in below}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-05T20:59:55+00:00",
+    "killed": 33,
+    "survived": [],
+    "killed_by": {
+      "unplayed pieces count": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "builds not taken as played": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_earlier_build_is_taken_by_its_label_and_a_run_s_by_its_name",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "strategies not taken as played": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_library_off_the_game_s_own_maps_is_not_run",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads"
+      ],
+      "held positions' kids played": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "earlier label by name": [
+        "test_an_earlier_build_is_taken_by_its_label_and_a_run_s_by_its_name"
+      ],
+      "library not deduped": [
+        "test_the_library_is_x2_s_then_the_own_maps_it_does_not_hold",
+        "test_two_pieces_holding_one_map_add_it_once"
+      ],
+      "library not listed": [
+        "test_a_map_with_another_empty_value_is_another_map",
+        "test_the_library_is_x2_s_then_the_own_maps_it_does_not_hold"
+      ],
+      "file once": ["test_the_library_file_comes_twice_from_the_sources"],
+      "file sources swapped": ["test_the_library_file_comes_twice_from_the_sources"],
+      "file earlier one short": ["test_the_library_file_comes_twice_from_the_sources"],
+      "run integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "U2 game unchecked": ["test_a_game_other_than_u2_s_is_not_run"],
+      "builds unchecked": [
+        "test_a_rebuild_off_its_root_move_is_not_run",
+        "test_builds_other_than_the_game_takes_are_not_run",
+        "test_builds_the_game_takes_on_another_root_move_are_not_run"
+      ],
+      "own unchecked": ["test_a_library_off_the_game_s_own_maps_is_not_run"],
+      "own counts rows without maps": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "rank unchecked": ["test_a_row_at_another_position_than_its_index_is_not_run"],
+      "rows' moves unchecked": ["test_a_rebuild_off_its_root_move_is_not_run"],
+      "played move unchecked": [
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run"
+      ],
+      "library unchecked": ["test_rows_off_their_library_are_not_run_unless_unfinished"],
+      "library once": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "unfinished rows judged": [
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_rows_off_their_library_are_not_run_unless_unfinished"
+      ],
+      "grown maps free": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads"
+      ],
+      "game unmeasured": [
+        "test_a_game_other_than_u2_s_is_not_run",
+        "test_a_game_whose_size_differs_from_u2_s_is_not_run"
+      ],
+      "rebuild not offered": [
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_the_bars_are_inclusive",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece"
+      ],
+      "readings not folded": [
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads"
+      ],
+      "only from the game": [
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "only from the smallest": [
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "larger start kept": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "unfinished can refute": ["test_an_unfinished_rebuild_is_no_option_and_cannot_refute"],
+      "support bar strict": ["test_the_bars_are_inclusive"],
+      "refute bar strict": ["test_the_bars_are_inclusive"],
+      "rebuilt miscounted": [
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute"
+      ],
+      "never-built position priced": [
+        "test_a_game_other_than_u2_s_is_not_run",
+        "test_a_game_whose_size_differs_from_u2_s_is_not_run",
+        "test_a_grown_map_that_costs_more_than_it_saves_stays_out",
+        "test_a_larger_rebuild_leaves_u2_s_game",
+        "test_a_rebuild_playing_a_grown_map_pays_it_once_however_it_reads",
+        "test_a_rebuild_playing_another_move_than_its_root_move_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_build",
+        "test_an_unfinished_rebuild_is_no_option_and_cannot_refute",
+        "test_only_pieces_the_game_plays_grow_the_library",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_game_is_never_worse_than_u2_s",
+        "test_the_search_runs_from_u2_s_game_and_from_every_position_s_smallest_piece",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ]
+    }
+  }
+}
