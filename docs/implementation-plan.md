@@ -651,6 +651,19 @@ rule standalone and in decision-list order, by ply.
     after), a mirrored reading paying its map once with the plain one. h365: at least 48/51 complete (≤ 40 refutes);
     h366: ≤ 97/100 of 180,199 (≥ 99/100 refutes). Probe with no build (h364): flipped maps cover 0 of 343 move nodes,
     mirrored readings 18. ~58 build-hours.
+  - **X2 result (h365 supported, h366 inconclusive — pre-registered; h367 after the data): 175,425 bits, 0.9735 of
+    180,199.** 51/51 complete, 57.7 build-hours. Bar 174,793 missed by 632 bits. U1's search takes the same 7 from none
+    and from all; 22 of Z1's 27 stay. 10 rebuilds play mirrored leaves (38 of 1,773). Library 72,989 bits (832 maps),
+    strategies 54,952, builds 46,639.
+  - **X3 (user's choice: mirror the ply-8 strategies; pre-registered h368, h369): the 409 ply-8 strategies rebuilt with
+    both readings.** `harness/floor_x3.py` (24/24): G4's positions, builder and 2-hour cap, X2's 5,196-entry library;
+    `x2_size` must reproduce 175,425 before anything is judged. h368: all 409 complete (≤ 401 refutes); h369: ≤ 97/100
+    of 175,425 (≥ 99/100 refutes). ~55 build-hours.
+  - **X3 result (h368, h369 supported — pre-registered; h370 after the data): the whole game takes 166,623 bits, 0.9498
+    of 175,425.** 409/409 complete, 75.6 build-hours, bar 170,162 cleared by 3,539. U1's search: 71 from all, 54 and
+    167,046 from none. Library 70,101 bits (797 maps), strategies 49,038, builds 46,639. Most of the gain needs no
+    mirrored leaf: the 18 rebuilds playing one alone give 172,678, the 391 with none alone give 169,962. No run with the
+    mirror off exists, so the mirror's own share at ply 8 is unmeasured.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);

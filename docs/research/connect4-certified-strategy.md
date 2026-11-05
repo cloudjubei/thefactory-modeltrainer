@@ -1,6 +1,6 @@
-# A certified first-player strategy for Connect-4 in 180,199 bits
+# A certified first-player strategy for Connect-4 in 166,623 bits
 
-Write-up, 2026-10-29, updated 2026-11-04 (Z1). Question: how small can a complete, certified description of a winning first-player strategy for
+Write-up, 2026-10-29, updated 2026-11-05 (X3). Question: how small can a complete, certified description of a winning first-player strategy for
 Connect-4 (7×6) be, if a generic process finds it? Each claim cited as hNNN is a registered claim in
 `examples/boardgames/hypotheses.json`, with its proof test and evidence file. A claim marked *after the data* was written
 once the run had finished; every other headline claim was registered before its run started.
@@ -9,19 +9,20 @@ once the run had finished; every other headline claim was registered before its 
 
 ## 1. Result
 
-1. **A certified winning strategy for the first player, from the empty board, in 180,199 bits (about 22.5 KB)** (G4, U1, Z1;
-   h358, h360, h363). It is G3's whole game (280,640 bits; h324, h326) with 51 of its 148 ply-6 subtrees replaced
-   by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 66 of the 409 ply-8 strategies rebuilt from every
-   map that game holds (G4, U1; §6), and 27 of the 51 ply-6 strategies rebuilt the same way (Z1; §6). It plays every reply the opponent can make, and every piece passed
+1. **A certified winning strategy for the first player, from the empty board, in 166,623 bits (about 20.8 KB)** (G4, U1, Z1, X2, X3;
+   h358, h360, h363, h367, h369, h370). It is G3's whole game (280,640 bits; h324, h326) with 51 of its 148 ply-6 subtrees replaced
+   by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 44 of the 409 ply-8 strategies rebuilt from every
+   map that game holds (G4, U1; §6), 22 of the 51 ply-6 strategies rebuilt the same way (Z1; §6), and 7 ply-6 and 71
+   ply-8 strategies rebuilt with every map also readable on the mirrored board (X2, X3; §6). It plays every reply the opponent can make, and every piece passed
    an independent walk confirming that it wins every line. The assembled game, by part:
 
    | Part | Bits | Share |
    |---|---|---|
    | Opening: 56 table moves to ply 6, 97 more at ply 6, and 233 positions the empty map already wins | 845 | 0.5% |
-   | Library: the 837 shared maps that some piece plays, each paid once | 73,329 | 40.7% |
-   | Strategies at the 409 ply-8 positions still used (66 of them G4's rebuilds) | 54,952 | 30.5% |
-   | Strategies built from the 51 ply-6 positions (27 of them Z1's rebuilds) | 51,073 | 28.3% |
-   | **Total** | **180,199** | |
+   | Library: the 797 shared maps that some piece plays, each paid once | 70,101 | 42.1% |
+   | Strategies at the 409 ply-8 positions still used (44 of them G4's rebuilds, 71 X3's) | 49,038 | 29.4% |
+   | Strategies built from the 51 ply-6 positions (22 of them Z1's rebuilds, 7 X2's) | 46,639 | 28.0% |
+   | **Total** | **166,623** | |
 
 2. **Where the bits went in G3, the last whole game built in one run:**
 
@@ -38,19 +39,20 @@ once the run had finished; every other headline claim was registered before its 
 
    | Description | Bits | vs this result |
    |---|---|---|
-   | The repo's policy net (not certified) | ~660,000 | 3.7x larger |
-   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 2.0x smaller |
-   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 4.0–5.1x smaller |
+   | The repo's policy net (not certified) | ~660,000 | 4.0x larger |
+   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.9x smaller |
+   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 3.7–4.8x smaller |
 
    WeakC4 uses a Connect-4-specific language (see §6, option 4). Every rule here is generic: nothing in it knows about
-   gravity, columns or threats beyond "a move that wins now" and "a move that lets the opponent win now".
+   gravity, columns or threats beyond "a move that wins now" and "a move that lets the opponent win now". The mirror a
+   leaf may read (§2) is a symmetry found by checking sampled play, not assumed.
 4. **The heavy tail sets the size.** The median frontier position takes 18 bits. The heaviest 10% (67 positions) hold
    108,834 of the 176,750 strategy bits, and the largest single position takes 5,691.
 
 The evidence for G3 is `examples/boardgames/evidence/c49_g3.json.gz`, and `harness/floor_g3.py` (`g3_size`)
-recomputes its total from it. The assembled game is recomputed by `tests/test_c49_z1_evidence.py`
-(`harness/floor_z1.py`: `harness/floor_u1.py`'s local search over Z1's rebuilds, on the game U1 chose) from G3 and the
-E1, O1, E3, V1, V2, G4 and Z1 evidence files.
+recomputes its total from it. The assembled game is recomputed by `tests/test_c49_x3_evidence.py`
+(`harness/floor_x3.py`: `harness/floor_u1.py`'s local search over X3's rebuilds, on the game X2 chose) from G3 and the
+E1, O1, E3, V1, V2, G4, Z1, X2 and X3 evidence files.
 
 ---
 
@@ -71,6 +73,10 @@ The opening leaves 671 first-player positions at ply 8 that the empty map does n
 3. Otherwise, the first level holding any safe move decides, and plays its lowest such move. Safe moves on cells the
    map leaves without a level count as a last level.
 
+**Reading a map mirrored.** A leaf built by X2 may play a library map on the board's mirror image, with the move
+mirrored back. The rule breaks ties by the lowest move, so this is not the same as flipping the map's cells (h364). The
+reference says which reading a leaf plays, and a map read both ways is paid once.
+
 **Exceptions.** A leaf may also carry exceptions: positions where the map's move does not win, each with the move to
 play instead. They are coded in the order a decoder replays the leaf, with flags only where the rules leave a choice
 (h183).
@@ -80,11 +86,12 @@ play instead. They are coded in the order a decoder replays the leaf, with flags
 - **References:** a leaf names its map by a move-to-front rank in walk order, the library maps it uses being named once
   (first_use coding; h312).
 - **Library:** maps shared across positions form a library, and each library map some leaf plays is paid once for the
-  whole game.
+  whole game. In X2's rebuilds the library's reference list holds each map twice, once per reading.
 
 **Certification.** Every leaf's map is verified over every continuation by a solver-free walk, then certified a
 second time independently. `check` re-walks the whole strategy against every reply with no oracle, and the oracle
-confirms that every table move in the tree wins. All 671 positions passed all four checks.
+confirms that every table move in the tree wins. All 671 positions passed all four checks. A mirrored leaf is checked
+and certified on the real board, with real replies, so neither rests on the symmetry.
 
 ---
 
@@ -123,9 +130,13 @@ ply 10.
 | G4 | The 409 ply-8 positions still taken from G3, rebuilt from every map the assembled game holds; 76 kept | 184,556 | 0.958 | h357–h359 |
 | U1 | The same rebuilds chosen by local search, one rebuild or every rebuild playing one map at a time; 66 kept | 184,328 | 0.9988 | h360 |
 | Z1 | The 51 ply-6 builds the game takes, rebuilt from every map it holds, chosen by the same search; 27 taken | 180,199 | 0.978 | h361–h363 |
+| X2 | The same 51 rebuilt from the same maps, every map also readable on the mirrored board; 7 taken | 175,425 | 0.974 | h364–h367 |
+| X3 | The 409 ply-8 strategies rebuilt from the same maps read both ways; 71 taken | 166,623 | 0.950 | h368–h370 |
 
 The whole-game passes stop at G3 by a rule set before it ran: pass again only while a pass gains a tenth. G4 and Z1 are
 library passes over the assembled game instead, each judged against its own 97/100 bar: G4 cleared it, Z1 fell short.
+X2 changes the language rather than the library and fell short of the same bar. X3 carries X2's change to the ply-8
+strategies and cleared it, though the rebuilds with no mirrored leaf clear it without the others (h370).
 
 The total compute was about 216 CPU-hours for F2, 219 for G2 and 151 for G3, on one 10-core laptop.
 
@@ -143,6 +154,7 @@ The total compute was about 216 CPU-hours for F2, 219 for G2 and 151 for G3, on 
 | References coded by first_use | 100,888 → 43,124 bits for F2's references (12.7% of F2) | h312 |
 | Library passes: rebuild every position from every map the last pass found | 0.74, then 0.955; 0.958 and 0.978 on the assembled game | h321, h325, h358, h359, h362, h363 |
 | The move at ply 6 chosen by what lies below: the builder's pick, then every winning move built | 0.69 of G3, assembled | h340, h344, h347, h349, h351, h356 |
+| Library maps also read on the mirrored board | 0.974 on the ply-6 builds; 0.950 on the ply-8 strategies, 0.984 from the rebuilds playing a mirrored leaf | h364, h366, h367, h369, h370 |
 
 ---
 
@@ -259,6 +271,26 @@ if new.
   smaller than their builds, and the 51 take 51,065 bits against 57,682; but all taken they grow the game to 186,419,
   for the maps they pay. U1's search stops at the same 27 from none taken and from all taken (21,606 bits against
   28,215; h363, after the data). The library grows to 837 maps, 73,329 bits, and is the largest part at 40.7%.
+- **Maps read on the mirrored board (X2, measured):** X1 left mirroring to the build. With no build, the 2,598 maps with
+  their cells flipped cover none of the 343 move nodes of Z1's rebuilds, because the rule breaks ties by the lowest
+  move; read on the mirrored board they cover 18 (h364, after the data). So the same 51 were rebuilt from the same maps
+  with both readings available, plain tried first. All finish (h365), and the whole game takes 175,425 bits, 0.9735 of
+  180,199: 632 bits short of the 97/100 bar and inside the 99/100 one, so h366 reads inconclusive. The 51 play 38
+  mirrored leaves of 1,773, in 10 rebuilds. Those 10 take 20,260 bits against Z1's 25,085 for the same positions, and
+  the 41 with none take 26,778 against 25,980. U1's search keeps the same 7 from none taken and from all taken, and 22
+  of Z1's 27 stay. Two of the 7 read mirrored, #2 and #4, saving 3,311 and 645 bits. The library falls to 832 maps,
+  72,989 bits, and takes 41.6% (h367, after the data).
+- **The ply-8 strategies rebuilt with both readings (X3, measured):** The 409 positions G4 rebuilt, with G4's builder and
+  2-hour cap and the mirror on, from X2's maps. All finish (h368), and the whole game takes 166,623 bits, 0.9498 of
+  175,425, past the 97/100 bar, so h369 is supported. The verdict does not credit the mirror alone. The 409 play 32
+  mirrored leaves of 2,134, in 18 rebuilds, which take 6,677 bits against 9,488 for the pieces they stand in for. With
+  only those 18 as candidates the game takes 172,678 (0.984), short of the bar; with only the 391 that play no mirrored
+  leaf it takes 169,962 (0.969), past it. Those 391 were still built with both readings available, and most of the
+  pieces they stand in for come from smaller libraries, so this run cannot say what the same rebuilds would do with the
+  mirror off. Of the 71 taken, 13 read mirrored and save 2,831 bits, and 58 do not and save 3,083; the library falls
+  2,888 bits to 797 maps, 70,101 bits (h370, after the data). U1's search no longer agrees from its two starts: 71 taken
+  from all, 54 and 167,046 bits from none, so 166,623 is a local best. All 409 taken the game takes 176,641. Four builds
+  ran past the cap, which ends improvement and leaves a build complete; three of them are taken.
 
 ---
 

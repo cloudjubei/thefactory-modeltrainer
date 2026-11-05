@@ -1,0 +1,234 @@
+{
+  "file": "harness/floor_x3.py",
+  "tests": ["tests/test_floor_x3.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "own integrity unchecked",
+      "old": "if _integrity(e, spec) or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:",
+      "new": "if x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:"
+    },
+    {
+      "name": "X2's game unchecked",
+      "old": "if _integrity(e, spec) or x2_size(x2_run, z, earlier, g4, g3, assembly, x2_spec).get(\"bits\") != spec[\"control_bits\"]:",
+      "new": "if _integrity(e, spec):"
+    },
+    {
+      "name": "indices unchecked",
+      "old": "if sorted(r[\"index\"] for r in e[\"roots\"]) != spec[\"indices\"] or any(_key(r) != at[r[\"index\"]] for r in e[\"roots\"]):",
+      "new": "if any(_key(r) != at[r[\"index\"]] for r in e[\"roots\"]):"
+    },
+    {
+      "name": "positions unchecked",
+      "old": "if sorted(r[\"index\"] for r in e[\"roots\"]) != spec[\"indices\"] or any(_key(r) != at[r[\"index\"]] for r in e[\"roots\"]):",
+      "new": "if sorted(r[\"index\"] for r in e[\"roots\"]) != spec[\"indices\"]:"
+    },
+    {
+      "name": "held count unchecked",
+      "old": "if sorted(r[\"index\"] for r in held) != spec[\"x2_held\"] or not all(r[\"complete\"] for r in held):",
+      "new": "if not all(r[\"complete\"] for r in held):"
+    },
+    {
+      "name": "held completion unchecked",
+      "old": "if sorted(r[\"index\"] for r in held) != spec[\"x2_held\"] or not all(r[\"complete\"] for r in held):",
+      "new": "if sorted(r[\"index\"] for r in held) != spec[\"x2_held\"]:"
+    },
+    {
+      "name": "done rows unchecked",
+      "old": "    if not all(j1_valid(r, x2_library(library)) for r in done):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "done rows off the single library",
+      "old": "if not all(j1_valid(r, x2_library(library)) for r in done):",
+      "new": "if not all(j1_valid(r, library) for r in done):"
+    },
+    {
+      "name": "unfinished rows counted",
+      "old": "done = [r for r in e[\"roots\"] if r[\"complete\"]]",
+      "new": "done = e[\"roots\"]"
+    },
+    {
+      "name": "G4's rebuilds not in the game",
+      "old": "base = {**assembly[\"base\"], **{_key(r): j1_piece(r, g4_lib) for r in g4_run[\"roots\"] if r[\"index\"] in spec[\"kept\"]}}",
+      "new": "base = {**assembly[\"base\"]}"
+    },
+    {
+      "name": "every G4 rebuild in the game",
+      "old": "for r in g4_run[\"roots\"] if r[\"index\"] in spec[\"kept\"]}}",
+      "new": "for r in g4_run[\"roots\"]}}"
+    },
+    {
+      "name": "Z1's rebuilds not in the game",
+      "old": "             **{_key(r): j1_piece(r, library) for r in z_run[\"roots\"] if r[\"index\"] in spec[\"z_held\"]},\n",
+      "new": ""
+    },
+    {
+      "name": "every Z1 rebuild in the game",
+      "old": "for r in z_run[\"roots\"] if r[\"index\"] in spec[\"z_held\"]},",
+      "new": "for r in z_run[\"roots\"]},"
+    },
+    {
+      "name": "X2's rebuilds not in the game",
+      "old": "},\n             **{_key(r): x2_piece(r, library) for r in held}}",
+      "new": "}}"
+    },
+    {
+      "name": "X2's rebuilds priced plainly",
+      "old": "**{_key(r): x2_piece(r, library) for r in held}}",
+      "new": "**{_key(r): j1_piece(r, x2_library(library)) for r in held}}"
+    },
+    {
+      "name": "rebuilds priced plainly",
+      "old": "rebuilds = {_key(r): x2_piece(r, library) for r in done}",
+      "new": "rebuilds = {_key(r): j1_piece(r, x2_library(library)) for r in done}"
+    },
+    {
+      "name": "control unchecked",
+      "old": "    if control != spec[\"control_bits\"]:\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "support exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "unfinished refutes",
+      "old": "\"refuted\" if not unfinished and rden",
+      "new": "\"refuted\" if rden"
+    },
+    {
+      "name": "worse start kept",
+      "old": "key=lambda s: s[1])",
+      "new": "key=lambda s: -s[1])"
+    },
+    {
+      "name": "search from none only",
+      "old": "(u1_choose(size, plays, frozenset()), u1_choose(size, plays, frozenset(rebuilds)))",
+      "new": "(u1_choose(size, plays, frozenset()),)"
+    },
+    {
+      "name": "search from all only",
+      "old": "(u1_choose(size, plays, frozenset()), u1_choose(size, plays, frozenset(rebuilds)))",
+      "new": "(u1_choose(size, plays, frozenset(rebuilds)),)"
+    },
+    {
+      "name": "unfinished never reported",
+      "old": "unfinished = len(done) < len(e[\"roots\"])",
+      "new": "unfinished = False"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-05T05:52:07+00:00",
+    "killed": 24,
+    "survived": [],
+    "killed_by": {
+      "own integrity unchecked": ["test_a_run_off_its_registration_is_not_run"],
+      "X2's game unchecked": [
+        "test_a_game_other_than_x2_s_is_not_run",
+        "test_a_run_off_its_registration_is_not_run",
+        "test_the_rebuilds_x2_took_replace_z1_s"
+      ],
+      "indices unchecked": ["test_rebuilds_other_than_the_registered_are_not_run"],
+      "positions unchecked": ["test_a_row_at_another_position_than_its_index_is_not_run"],
+      "held count unchecked": ["test_a_rebuild_x2_did_not_hold_or_finish_is_not_run"],
+      "held completion unchecked": ["test_a_rebuild_x2_did_not_hold_or_finish_is_not_run"],
+      "done rows unchecked": ["test_rows_off_their_library_are_not_run_unless_unfinished"],
+      "done rows off the single library": [
+        "test_a_build_x2_took_is_priced_by_the_map_it_plays_whichever_way_it_reads",
+        "test_a_larger_rebuild_leaves_its_strategy",
+        "test_a_map_the_game_pays_read_either_way_costs_nothing",
+        "test_a_new_map_read_both_ways_is_paid_once",
+        "test_a_rebuild_x2_did_not_hold_or_finish_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_strategy",
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute",
+        "test_only_the_rebuilds_x2_took_are_in_the_control",
+        "test_only_the_rebuilds_z1_took_are_in_the_control",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_rebuilds_x2_took_replace_z1_s",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "unfinished rows counted": [
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute",
+        "test_rows_off_their_library_are_not_run_unless_unfinished"
+      ],
+      "G4's rebuilds not in the game": [
+        "test_a_build_x2_took_is_priced_by_the_map_it_plays_whichever_way_it_reads",
+        "test_a_larger_rebuild_leaves_its_strategy",
+        "test_a_map_the_game_pays_read_either_way_costs_nothing",
+        "test_a_new_map_read_both_ways_is_paid_once",
+        "test_a_rebuild_x2_did_not_hold_or_finish_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_strategy",
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute",
+        "test_only_the_rebuilds_x2_took_are_in_the_control",
+        "test_only_the_rebuilds_z1_took_are_in_the_control",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_rebuilds_x2_took_replace_z1_s",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "every G4 rebuild in the game": [
+        "test_a_build_x2_took_is_priced_by_the_map_it_plays_whichever_way_it_reads",
+        "test_a_larger_rebuild_leaves_its_strategy",
+        "test_a_map_the_game_pays_read_either_way_costs_nothing",
+        "test_a_new_map_read_both_ways_is_paid_once",
+        "test_a_rebuild_x2_did_not_hold_or_finish_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_strategy",
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute",
+        "test_only_the_rebuilds_x2_took_are_in_the_control",
+        "test_only_the_rebuilds_z1_took_are_in_the_control",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_rebuilds_x2_took_replace_z1_s",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "Z1's rebuilds not in the game": [
+        "test_a_rebuild_x2_did_not_hold_or_finish_is_not_run",
+        "test_only_the_rebuilds_x2_took_are_in_the_control",
+        "test_only_the_rebuilds_z1_took_are_in_the_control"
+      ],
+      "every Z1 rebuild in the game": ["test_only_the_rebuilds_z1_took_are_in_the_control"],
+      "X2's rebuilds not in the game": [
+        "test_a_build_x2_took_is_priced_by_the_map_it_plays_whichever_way_it_reads",
+        "test_a_larger_rebuild_leaves_its_strategy",
+        "test_a_map_the_game_pays_read_either_way_costs_nothing",
+        "test_a_new_map_read_both_ways_is_paid_once",
+        "test_a_rebuild_x2_did_not_hold_or_finish_is_not_run",
+        "test_a_smaller_rebuild_replaces_its_strategy",
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute",
+        "test_only_the_rebuilds_x2_took_are_in_the_control",
+        "test_rows_off_their_library_are_not_run_unless_unfinished",
+        "test_the_bars_are_inclusive",
+        "test_the_rebuilds_x2_took_replace_z1_s",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "X2's rebuilds priced plainly": [
+        "test_a_build_x2_took_is_priced_by_the_map_it_plays_whichever_way_it_reads"
+      ],
+      "rebuilds priced plainly": [
+        "test_a_map_the_game_pays_read_either_way_costs_nothing",
+        "test_a_new_map_read_both_ways_is_paid_once"
+      ],
+      "control unchecked": ["test_a_control_other_than_the_spec_s_is_not_run"],
+      "support exclusive": ["test_the_bars_are_inclusive"],
+      "refute exclusive": ["test_the_bars_are_inclusive"],
+      "unfinished refutes": ["test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute"],
+      "worse start kept": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "search from none only": ["test_the_smaller_of_the_two_starts_is_kept"],
+      "search from all only": [
+        "test_a_smaller_rebuild_replaces_its_strategy",
+        "test_the_smaller_of_the_two_starts_is_kept"
+      ],
+      "unfinished never reported": [
+        "test_an_unfinished_rebuild_keeps_its_strategy_and_cannot_refute"
+      ]
+    }
+  }
+}

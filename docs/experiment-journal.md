@@ -6124,3 +6124,41 @@ Incident while building it: the judge was first written as floor_m1, a name take
 because the check for free names was a shell glob that aborted on no match. Four tracked files were overwritten before
 anything was registered or run. All four were restored from git and h283's pins match; the work moved to X2.
 X2 launched 2026-11-04 14:33Z, PID 50722, 7 workers, the only run.
+
+X2 finished 2026-11-05 00:27Z (h365 supported, h366 inconclusive, both pre-registered; h367 after the data). All 51
+rebuilds complete, 57.7 build-hours, the longest 4.03, 147 own maps between them. The whole game takes 175,425 bits,
+0.9735 of 180,199: 632 bits over the 97/100 bar (174,793) and inside the 99/100 one, so h366 reads inconclusive.
+tests/test_c49_x2_after_evidence.py holds the parts: U1's search stops at the same 7 from none and from all taken
+({2, 4, 68, 71, 72, 118, 130}; 22 of Z1's 27 stay); all 51 taken would take 184,651. The 51 play 38 mirrored leaves of
+1,773, in 10 rebuilds. Those 10 take 20,260 bits against Z1's 25,085 at the same positions, and the 41 with none 26,778
+against 25,980. Of the 7 taken, #2 (8 mirrored leaves) and #4 (7) save 3,311 and 645 bits on their builds. Opening 845,
+library 72,989 (832 maps, 151 beyond G3's library, 20 of those beyond G4's), 409 strategies 54,952 (unchanged), builds
+46,639. Builds fell 4,434 and the library 340. Write-up headline now 175,425, and §2 now describes the mirrored reading;
+against the references 3.8x smaller than the policy net, 1.9x larger than WeakC4 as shipped, 3.9–5.0x larger than
+WeakC4 entropy-coded.
+
+X3 registered 2026-11-05 (user's choice after X2: mirror the ply-8 strategies; pre-registered h368, h369). X2 gave only
+the 51 ply-6 builds both readings. harness/floor_x3.py rebuilds the 409 ply-8 strategies, G4's positions, with G4's
+builder and 2-hour cap and `mirror` on, from the 2,598 maps X2 read both ways, so the second reading is what changes
+from the game they stand in. The ply-6 builds are not rebuilt. x3_size calls the pinned x2_size and refuses unless it
+reproduces 175,425, which proves the earlier runs without copying their checks. Rebuilds are candidates for the
+strategies they replace, chosen by U1's search from none taken and from all taken. h368: all 409 complete (401 or fewer
+refutes); h369: 97/100 of 175,425 or less supports, 99/100 or more refutes once all finished. 19 tests, 24/24 mutants
+(three survivors first, refused by another check, closed by fixtures only the guard in question can stop). Dry run
+through the judge on placeholder rows: control 175,425, rebuilt 0, fingerprint 8d1b222ed933.
+X3 launched 2026-11-05 05:55Z, PID 49527, 7 workers, the only run.
+
+X3 result 2026-11-05 (h368, h369 supported, pre-registered; h370 after the data). Finished 17:38Z, 409 of 409 complete,
+75.6 build-hours against G4's 55.2 for the same positions. The whole game takes 166,623 bits, 0.9498 of 175,425, and
+clears the bar of 170,162 by 3,539. Correction to the registration note above: the second reading is not all that
+changes. The pieces the rebuilds stand in for were built from smaller libraries, so a rebuild differs by more than the
+mirror; floor_x3's docstring is corrected. The split shows it. The 409 play 32 mirrored leaves of 2,134, in 18 rebuilds
+(6,677 bits against 9,488); the 391 with none take 46,042 against 45,464. U1's search over the 18 alone gives 172,678,
+short of the bar; over the 391 alone 169,962, past it. Both groups together give 166,623, more than either alone. Of the
+71 taken 13 read mirrored and save 2,831, 58 do not and save 3,083, and the library falls 2,888 to 797 maps, 70,101 bits.
+So h369 stands as worded on its bar, but this run does not show the mirror caused the gain: no rebuild with the mirror
+off exists at ply 8. U1's two starts now differ, 71 taken from all and 54 at 167,046 from none, so the result is a local
+best. All 409 taken gives 176,641. Four builds (#267, #269, #273, #275) ran past the 2-hour cap, up to 8,499 s, and stayed
+complete, since the cap ends improvement; three are taken. Parts: opening 845, library 70,101, strategies 49,038, builds
+46,639. Write-up headline now 166,623; against the references 4.0x smaller than the policy net, 1.9x larger than WeakC4
+as shipped, 3.7–4.8x larger than WeakC4 entropy-coded.

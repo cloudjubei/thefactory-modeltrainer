@@ -10845,10 +10845,17 @@
       "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_48_of_the_51_rebuilds_complete",
       "note": "",
       "registered_at": "2026-11-04T14:33:08.158646+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_48_of_the_51_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.87s",
+          "drawn_at": "2026-11-05T00:27:20.575242+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_x2.json.gz",
-        "started": null
+        "started": "2026-11-04T14:33:54+00:00"
       },
       "pins": {
         "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2",
@@ -10871,10 +10878,18 @@
       "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_the_whole_game_with_the_mirror_takes_97_100_of_180_199_or_less",
       "note": "",
       "registered_at": "2026-11-04T14:33:09.096504+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x2_evidence.py::test_c49_x2_the_whole_game_with_the_mirror_takes_97_100_of_180_199_or_less",
+          "ok": false,
+          "detail": "d\nE         + inconclusive\n\ntests/test_c49_x2_evidence.py:50: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_x2_evidence.py::test_c49_x2_the_whole_game_with_the_mirror_takes_97_100_of_180_199_or_less\n1 failed in 135.11s (0:02:15)",
+          "drawn_at": "2026-11-05T00:29:40.309792+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_x2.json.gz",
-        "started": null
+        "started": "2026-11-04T14:33:54+00:00"
       },
       "pins": {
         "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2",
@@ -10889,6 +10904,151 @@
         "tests/test_c49_z1_evidence.py": "33a78dcaf922fd990fbbc0ba28c372ac560ee8682a3b9c9702389618418f1072"
       },
       "inconclusive_proof": "tests/test_c49_x2_evidence.py::test_c49_x2_the_size_is_undecidable"
+    },
+    "h367": {
+      "id": "h367",
+      "claim": "\u00a73.6 X2 (after the data): U1's search over X2's 51 complete rebuilds stops at the same 7 from none taken and from all taken ({2, 4, 68, 71, 72, 118, 130}; 22 of Z1's 27 stay), and the whole game takes 175,425 bits (0.9735 of 180,199; 4,774 fewer); all 51 taken it would take 184,651. The 51 play 38 mirrored leaves of 1,773, in 10 rebuilds, which take 20,260 bits against Z1's 25,085 for the same positions; the 41 with none take 26,778 against 25,980. Of the 7 taken #2 (8 mirrored leaves) and #4 (7) save 3,311 and 645 bits. Parts: opening 845, library 72,989 (832 maps, 151 beyond G3's library, 20 of those beyond G4's), 409 strategies 54,952, builds at 51 ply-6 positions 46,639.",
+      "mode": "test",
+      "proof": "tests/test_c49_x2_after_evidence.py::test_c49_x2_7_of_the_51_rebuilds_take_the_whole_game_to_175_425_bits",
+      "note": "",
+      "registered_at": "2026-11-05T00:41:09.071292+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x2_after_evidence.py::test_c49_x2_7_of_the_51_rebuilds_take_the_whole_game_to_175_425_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 228.97s (0:03:48)",
+          "drawn_at": "2026-11-05T00:45:03.590464+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x2.json.gz",
+        "started": "2026-11-04T14:33:54+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x2_after_evidence.py": "954f007837f60b458ff81e1fd25cbc6843fe00f3e67db340cc9a900bfa52dcec",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2"
+      }
+    },
+    "h368": {
+      "id": "h368",
+      "claim": "\u00a73.6 X3: the 409 ply-8 strategies the assembled whole game takes (175,425 bits; X2's game), each rebuilt at the same position with the builder G4 rebuilt them with (2-hour cap), from the 2,598 maps X2 read both ways (harness.mirror_builder) \u2014 all 409 complete (401 or fewer refutes).",
+      "mode": "test",
+      "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_all_409_rebuilds_complete",
+      "note": "",
+      "registered_at": "2026-11-05T05:55:43.972119+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_all_409_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 9.78s",
+          "drawn_at": "2026-11-05T17:44:00.881657+00:00"
+        },
+        {
+          "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_all_409_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 5.89s",
+          "drawn_at": "2026-11-05T18:19:01.714887+00:00"
+        },
+        {
+          "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_all_409_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 5.87s",
+          "drawn_at": "2026-11-05T18:28:26.525115+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x3.json.gz",
+        "started": "2026-11-05T05:55:58+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2"
+      },
+      "inconclusive_proof": "tests/test_c49_x3_evidence.py::test_c49_x3_completion_is_undecidable"
+    },
+    "h369": {
+      "id": "h369",
+      "claim": "\u00a73.6 X3: reading the library on the mirrored board shrinks the ply-8 strategies too \u2014 with X3's complete rebuilds as candidates for the strategies they replace, a mirrored reading paying its map once with the plain one, chosen by U1's search from none taken and from all taken (never worse than 175,425), the whole game takes 97/100 of 175,425 bits or less (99/100 or more refutes once every rebuild finished).",
+      "mode": "test",
+      "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_the_whole_game_with_the_mirror_takes_97_100_of_175_425_or_less",
+      "note": "",
+      "registered_at": "2026-11-05T05:55:44.115446+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x3_evidence.py::test_c49_x3_the_whole_game_with_the_mirror_takes_97_100_of_175_425_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 608.20s (0:10:08)",
+          "drawn_at": "2026-11-05T17:54:35.588633+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x3.json.gz",
+        "started": "2026-11-05T05:55:58+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x2_evidence.py": "5b477a3dac9630e76293219aabefa8dd838786538d568ffb07d2b612894169f2"
+      },
+      "inconclusive_proof": "tests/test_c49_x3_evidence.py::test_c49_x3_the_size_is_undecidable"
+    },
+    "h370": {
+      "id": "h370",
+      "claim": "\u00a73.6 X3 (after the data): U1's search over X3's 409 complete rebuilds stops at 71 from all taken (166,623 bits, 0.9498 of 175,425; 8,802 fewer) and at 54 from none taken (167,046); all 409 taken it would take 176,641. The 409 play 32 mirrored leaves of 2,134, in 18 rebuilds, which take 6,677 bits against 9,488 for the pieces they stand in for; the 391 with none take 46,042 against 45,464. With only the 18 as candidates the whole game takes 172,678, short of the 97/100 bar; with only the 391 it takes 169,962, past it with no mirrored leaf played. Of the 71 taken 13 read mirrored and save 2,831 bits, 58 do not and save 3,083. Builds #267, #269, #273 and #275 ran past the 2-hour cap; the first three are taken. Parts: opening 845, library 70,101 (797 maps, 177 beyond G3's library, 30 of those beyond G4's), 409 strategies 49,038, builds at 51 ply-6 positions 46,639.",
+      "mode": "test",
+      "proof": "tests/test_c49_x3_after_evidence.py::test_c49_x3_71_of_the_409_rebuilds_take_the_whole_game_to_166_623_bits",
+      "note": "",
+      "registered_at": "2026-11-05T18:18:42.697227+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_x3_after_evidence.py::test_c49_x3_71_of_the_409_rebuilds_take_the_whole_game_to_166_623_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 509.67s (0:08:29)",
+          "drawn_at": "2026-11-05T18:27:40.271560+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_x3.json.gz",
+        "started": "2026-11-05T05:55:58+00:00"
+      },
+      "pins": {
+        "tests/test_c49_x3_after_evidence.py": "44400c08785831de55cec282bc7d68aa2bed0a3876dea1c9cc7cf458c878c87b",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e",
+        "harness/floor_x2.py": "b3c060103dd138abdda91aabcf6ff47d93d243d195226a2596c4376e04e6e327",
+        "harness/mirror_builder.py": "dda7d9f80a17868077ac9bbf3bf29a4377625314fc90e240cb4ca8c11c733d37",
+        "harness/floor_z1.py": "c0d2644a46598cc360e3e3ef286cf5d87653cf0defa05d9641d7c09aecf4dc86",
+        "harness/floor_u1.py": "9d5ff520bd83e463d494f10fcbd5f8cbe3c063e6499cecb12e761bc7c7d256bf",
+        "harness/floor_g4.py": "fa6d48d7205f2061c706a7f9dcfe66856acc7d1b4d41115e4a31c7979e495e2b",
+        "harness/floor_v2.py": "e2a0200a7624a1ada885779e8b81d0c2502a5f6d654563d5ef6d0768e730b65c",
+        "harness/floor_j1.py": "f73c813a1eeb6e821fd68859960a41031e2d7e4540444150a5df770343de6f32",
+        "tests/test_c49_v1_evidence.py": "74ade606739e660e62f8c2f0dccb829f04bd82fe0f64d477fe46d969299078e0",
+        "tests/test_c49_x3_evidence.py": "5290700a53eab2825614f3c3bd914b8f20f6c13bdb3d443805d105ff2e9620bf"
+      }
     }
   }
 }

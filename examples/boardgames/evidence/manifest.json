@@ -712,6 +712,10 @@
       "sha256": "9d69873a3ce096118b2697abe5a3f7217f6d1c660613d2be4055f2254161a0b5",
       "started": "2026-10-29T23:04:40+00:00"
     },
+    "c49_x2.json.gz": {
+      "sha256": "9440f44004a63df7be97f9eef2b3871b10c28302ff6e4bc6f955563f9ab9a444",
+      "started": "2026-11-04T14:33:54+00:00"
+    },
     "c49_x2_library.json.gz": {
       "sha256": "5552cd424cd6143e6b3d3f8008d5e7ef5134a1778203c74ec05606463bb1b2d7",
       "started": "2026-11-04T14:27:29+00:00"
@@ -719,6 +723,10 @@
     "c49_x2_probe.json.gz": {
       "sha256": "1fa890e79c2e1189063fffde9a9811349487e51c2a5fa7ef6abd4192cf5622b9",
       "started": "2026-11-04T14:30:04+00:00"
+    },
+    "c49_x3.json.gz": {
+      "sha256": "af2ecfa8e3220d4d9ad0b7bfd70cadfd187dd29de8f80a0a18eec6812407d792",
+      "started": "2026-11-05T05:55:58+00:00"
     },
     "c49_z1.json.gz": {
       "sha256": "68dfd27773714f13e1e7888474b05421fd1c74d5a54b44f61368fd37b36a11e3",
