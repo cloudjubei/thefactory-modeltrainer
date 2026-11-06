@@ -670,9 +670,9 @@ rule standalone and in decision-list order, by ply.
   - **U2 result (h373 supported, POST-HOC by the register: registered while X4 ran, search unseen; h375 after the data):
     the whole game takes 165,023 bits, 0.9904 of 166,623.** No new builds. 165,196 from X3's game, 165,023 from every
     position's smallest piece. Library 70,917 (807 maps), 416 strategies 49,604, 50 builds 43,653, opening 849.
-  - **Running (user's choice after X3):** Z2 (pre-registered h376, h377): the 50 builds of U2's game rebuilt with both
-    readings from X2's maps plus the 163 own maps of the pieces the game plays, `harness/floor_z2.py` (33/33). 47 of 50
-    complete; 99/100 of 165,023 or less supports, 999/1000 or more refutes.
+  - **Z2 result (h376, h377 supported — pre-registered; h378 after the data): the whole game takes 162,752 bits, 0.9862
+    of 165,023.** 50/50 complete, 47.2 build-hours, none at the cap. 162,752 from U2's game, 163,104 from every position's
+    smallest piece; 9 rebuilds taken. Library 70,435 (801 maps), 416 strategies 49,692, 50 builds 41,776, opening 849.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);

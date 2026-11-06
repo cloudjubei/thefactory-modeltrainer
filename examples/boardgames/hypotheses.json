@@ -11189,10 +11189,17 @@
       "proof": "tests/test_c49_z2_evidence.py::test_c49_z2_47_of_the_50_rebuilds_complete",
       "note": "",
       "registered_at": "2026-11-05T21:36:59.440266+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z2_evidence.py::test_c49_z2_47_of_the_50_rebuilds_complete",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.84s",
+          "drawn_at": "2026-11-06T05:50:05.785593+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_z2.json.gz",
-        "started": null
+        "started": "2026-11-05T21:37:48+00:00"
       },
       "pins": {
         "tests/test_c49_z2_evidence.py": "4b5be63d5c750b75196cdb44392ad7c0dd2c1883bf827c1742f01d6f99d45e85",
@@ -11209,10 +11216,17 @@
       "proof": "tests/test_c49_z2_evidence.py::test_c49_z2_the_whole_game_takes_99_100_of_165_023_or_less",
       "note": "",
       "registered_at": "2026-11-05T21:37:00.127766+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z2_evidence.py::test_c49_z2_the_whole_game_takes_99_100_of_165_023_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1479.91s (0:24:39)",
+          "drawn_at": "2026-11-06T06:14:57.103472+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_z2.json.gz",
-        "started": null
+        "started": "2026-11-05T21:37:48+00:00"
       },
       "pins": {
         "tests/test_c49_z2_evidence.py": "4b5be63d5c750b75196cdb44392ad7c0dd2c1883bf827c1742f01d6f99d45e85",
@@ -11247,6 +11261,33 @@
       },
       "pins": {
         "tests/test_c49_u2_after_evidence.py": "8079763b75a9df103f44decc07f2e6cafeed876f40f1ce087806157d09292342",
+        "harness/floor_u2.py": "547fff7858b33613a46b93d42b6c0972191d337c1daa4f1e11aadc107d41a150",
+        "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
+        "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e"
+      }
+    },
+    "h378": {
+      "id": "h378",
+      "claim": "\u00a73.6 Z2 (after the data): with the 50 rebuilds as options U2's search stops at 162,752 bits from U2's game and at 163,104 from every position's smallest piece, 2,271 under U2's 165,023 (0.9862 of it). 21 of the 50 are smaller than the piece the game took at their position, 29 larger, and together they take 42,528 bits against 43,653. The search takes 9: 8 of the smaller and #118, which is larger. 13 positions differ from U2's game, all in play: those 9 builds (5 of Z1's, 3 earlier, 1 of X2's), 3 of G3's strategies for G4's and 1 of X3's for G4's. Parts: opening 849, library 70,435 (801 maps, 223 beyond G3's library, 40 of those beyond G4's, 7 of those beyond X2's), 416 strategies 49,692, 50 builds 41,776. No build reached the 6-hour cap, and the 50 took 47.2 build-hours.",
+      "mode": "test",
+      "proof": "tests/test_c49_z2_after_evidence.py::test_c49_z2_the_rebuilds_chosen_again_take_the_whole_game_to_162_752_bits",
+      "note": "",
+      "registered_at": "2026-11-06T06:40:27.715281+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_z2_after_evidence.py::test_c49_z2_the_rebuilds_chosen_again_take_the_whole_game_to_162_752_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1451.87s (0:24:11)",
+          "drawn_at": "2026-11-06T07:04:54.414781+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_z2.json.gz",
+        "started": "2026-11-05T21:37:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_z2_after_evidence.py": "03bc55ed4b627f39a45e0d9cc2b40ff785722f557e6ef93649f0129ef61c60cb",
+        "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781",
         "harness/floor_u2.py": "547fff7858b33613a46b93d42b6c0972191d337c1daa4f1e11aadc107d41a150",
         "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
         "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e"

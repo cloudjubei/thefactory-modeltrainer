@@ -322,3 +322,4 @@
 {"event": "start", "id": "79f74cfc9229", "name": "c4_strategy_s2", "argv": ["--help"], "at": "2026-11-05T21:37:41+00:00"}
 {"event": "end", "id": "79f74cfc9229", "status": "failed", "error": "SystemExit: 0", "at": "2026-11-05T21:37:41+00:00", "seconds": 0.1}
 {"event": "start", "id": "54953a04f150", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_z2", "--workers", "7", "--out", "evidence/c49_z2.json.gz", "--progress", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/z2_progress.json"], "at": "2026-11-05T21:37:48+00:00"}
+{"event": "end", "id": "54953a04f150", "status": "completed", "at": "2026-11-06T05:49:46+00:00", "seconds": 29517.8}

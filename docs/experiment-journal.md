@@ -6208,3 +6208,12 @@ nothing, removed, and two test gaps, closed. Dry run on the real evidence with t
 reproduced 165,023 and accepted `own` and the root moves.
 
 Z2 launched 2026-11-05, 7 workers, the only run. X2's same-sized run took 57.7 build-hours, 4.0 at most.
+
+Z2 result 2026-11-06 (h376, h377 supported, pre-registered; h378 after the data). 21:37Z–05:49Z, 50/50 complete, 47.2
+build-hours, 4.0 at most, none at the 6-hour cap. 162,752 from U2's game, 163,104 from every position's smallest piece:
+0.9862 of 165,023, past the 99/100 bar (163,372) by 620. 21 of the 50 are smaller than the piece the game took at their
+position, 29 larger; together 42,528 against 43,653. 9 taken: #44, #47, #48, #79, #89, #103, #114, #140 and #118, which
+is larger (241 against 174). 13 positions change: those 9 (5 of Z1's, 3 earlier, 1 of X2's), 3 of G3's strategies and 1
+of X3's to G4's. Parts: opening 849, library 70,435 (801 maps, 223 beyond G3's library, 40 of those beyond G4's, 7 of
+those beyond X2's), 416 strategies 49,692, 50 builds 41,776. Write-up headline now 162,752; against the references 4.1x
+smaller than the policy net, 1.8x larger than WeakC4 as shipped, 3.6–4.7x larger than WeakC4 entropy-coded.
