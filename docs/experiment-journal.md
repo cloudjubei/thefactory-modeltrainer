@@ -6217,3 +6217,31 @@ is larger (241 against 174). 13 positions change: those 9 (5 of Z1's, 3 earlier,
 of X3's to G4's. Parts: opening 849, library 70,435 (801 maps, 223 beyond G3's library, 40 of those beyond G4's, 7 of
 those beyond X2's), 416 strategies 49,692, 50 builds 41,776. Write-up headline now 162,752; against the references 4.1x
 smaller than the policy net, 1.8x larger than WeakC4 as shipped, 3.6–4.7x larger than WeakC4 entropy-coded.
+
+Library recoding looked at 2026-11-06, the user's choice after Z2. M1 had already refuted simple exact codes (h283, h284),
+so only models shared across maps were open. Developed on the 1,960 listed maps the game does not play: on samples of 801,
+adaptive codes over all 42 cells take 1.03 or more of today's code, and chosen-cell flags plus per-cell adaptive levels
+take 0.965 if the decoder knows which cells are empty. That condition does not hold: `map_bits` pays a bit per cell empty
+where a map was FOUND, and the assembled game never states that position. In scratch, 438 of the 801 maps have a levelled
+cell already full at the first leaf that plays them, and for 337 no leaf has every levelled cell empty (271 of 613 among
+rows that never read a mirror). 576 levelled cells are full at every leaf playing the map, so a leaf never reads them. A
+rough strict code takes 73,025 against the 70,435 counted. The count also pays nothing for telling a piece from a trivial
+position or for which list a piece's references point into. The play is not in question; the size is a count, not a file.
+
+T1 registered 2026-11-06 (pre-registered h379, h380; the user chose a strict code and a full decode). One walk from the
+empty board writes the game through an arithmetic coder; a decoder has the bytes, the game's rules, the map rule's
+settings and the mirror. 72 tests, 61/61 mutants after 7 test gaps closed and 3 equivalents removed (two of them dead
+code). Dry run on G3's game: 225,678 bits against 280,640 counted, 0 differences read back. Bars set from it: 9/10 of
+162,752 or less supports, all of it or more refutes.
+
+T1 result 2026-11-06 (h379, h380 supported — pre-registered; h382 after the data). Z2's game is one file of 130,005 bits,
+16,251 bytes, 0.7988 of the 162,752 it was counted at, past the 9/10 bar (146,476). It read back from its bytes alone
+with 0 differences, and the run's replay won every line of all 3,372 leaves; the proof decodes the file, assembles the
+game again, compares and encodes it back to the same bytes. 12:07Z–14:13Z on 7 workers. Parts: maps 89,289 (cells 31,674,
+levels 57,615) against the count's 99,613, exceptions 21,051 against 21,815, tree 19,663 against 41,324. So 21,661 of the
+32,747 bits saved are the tree's, not the maps'. Levels take 2.92 bits a cell of the 3 a level can take. The file holds
+4,052 positions, 680 moves, 3,372 leaves (616 on the empty map, 43 mirrored, 129 with 1,625 exceptions) and 1,052 maps of
+19,715 cells, 514 read once. The headline is now the file. Not in it: the game's rules, the map rule's settings, the mirror
+and the decoder program. h381 was registered with one pin (--pins takes a comma-separated list, and the repeated flag
+kept the last) and never run; h382 is the same claim with all five pins, and it supersedes h381. The pieces were chosen
+against the count, so no search has seen what a piece costs in the file.

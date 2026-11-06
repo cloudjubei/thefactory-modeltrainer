@@ -673,6 +673,12 @@ rule standalone and in decision-list order, by ply.
   - **Z2 result (h376, h377 supported — pre-registered; h378 after the data): the whole game takes 162,752 bits, 0.9862
     of 165,023.** 50/50 complete, 47.2 build-hours, none at the cap. 162,752 from U2's game, 163,104 from every position's
     smallest piece; 9 rebuilds taken. Library 70,435 (801 maps), 416 strategies 49,692, 50 builds 41,776, opening 849.
+  - **T1 result (h379, h380 supported — pre-registered; h382 after the data): Z2's game is one file of 130,005 bits
+    (16,251 bytes), 0.7988 of the 162,752 it was counted at.** `harness/floor_t1.py`, `harness/strategy_file.py`,
+    `harness/arithmetic_coding.py` (61/61). It reads back from its bytes alone with 0 differences, and all 3,372 leaves
+    won in the run's replay. Maps 89,289 (count 99,613), exceptions 21,051 (21,815), tree 19,663 (41,324). Every
+    whole-game size before it was a count, and the headline is now the file. The decoder's rules, mirror and program are
+    not in the 130,005. The pieces were chosen against the count, not the file.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);

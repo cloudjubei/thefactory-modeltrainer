@@ -1,0 +1,134 @@
+{
+  "file": "harness/arithmetic_coding.py",
+  "tests": ["tests/test_arithmetic_coding.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "no learning",
+      "old": "        table[value] += ALPHA_DEN",
+      "new": "        pass"
+    },
+    {
+      "name": "encoder high off by one",
+      "old": "self.high = self.low + span * end // total - 1\n        self.low = self.low + span * start // total\n        while True:\n            if self.high < HALF:\n                self._emit(0)",
+      "new": "self.high = self.low + span * end // total\n        self.low = self.low + span * start // total\n        while True:\n            if self.high < HALF:\n                self._emit(0)"
+    },
+    {
+      "name": "parts not counted",
+      "old": "self.parts[family] = self.parts.get(family, 0.0) - math.log2((end - start) / total)",
+      "new": "pass"
+    },
+    {
+      "name": "pending dropped",
+      "old": "self.out.extend([1 - bit] * self.pending)",
+      "new": "pass"
+    },
+    {
+      "name": "pending same bit",
+      "old": "self.out.extend([1 - bit] * self.pending)",
+      "new": "self.out.extend([bit] * self.pending)"
+    },
+    {
+      "name": "no closing bits",
+      "old": "        self.pending += 1\n        self._emit(0 if self.low < QUARTER else 1)\n",
+      "new": "        pass\n"
+    },
+    {
+      "name": "trailing zeros kept",
+      "old": "        while bits and bits[-1] == 0:\n            bits.pop()\n",
+      "new": ""
+    },
+    {
+      "name": "symbol range unchecked",
+      "old": "        if not 0 <= value < n:\n            raise ValueError(f\"{value} is not one of {n} values\")\n        if n > 1:\n            table",
+      "new": "        if n > 1:\n            table"
+    },
+    {
+      "name": "uniform range unchecked",
+      "old": "        if not 0 <= value < n:\n            raise ValueError(f\"{value} is not one of {n} values\")\n        if n > 1:\n            self._code(family, value, value + 1, n)",
+      "new": "        if n > 1:\n            self._code(family, value, value + 1, n)"
+    },
+    {
+      "name": "contexts merged",
+      "old": "return self.tables.setdefault((family, context, n), [ALPHA_NUM] * n)",
+      "new": "return self.tables.setdefault((family, n), [ALPHA_NUM] * n)"
+    },
+    {
+      "name": "decoder past end reads one",
+      "old": "if i // 8 < len(self.data) else 0",
+      "new": "if i // 8 < len(self.data) else 1"
+    },
+    {
+      "name": "decoder target off",
+      "old": "return ((self.value - self.low + 1) * total - 1) // (self.high - self.low + 1)",
+      "new": "return ((self.value - self.low) * total) // (self.high - self.low + 1) + 1"
+    },
+    {
+      "name": "decoder does not learn",
+      "old": "        self._take(start, start + table[value], total)\n        self.learn(table, value)\n",
+      "new": "        self._take(start, start + table[value], total)\n"
+    },
+    {
+      "name": "bit order flipped",
+      "old": "data[i // 8] |= bit << (7 - i % 8)",
+      "new": "data[i // 8] |= bit << (i % 8)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-06T12:06:22+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "no learning": [
+        "test_a_decoder_reads_zeros_past_the_end_of_the_file",
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_contexts_learn_apart",
+        "test_the_first_symbol_of_a_context_is_priced_by_the_prior"
+      ],
+      "encoder high off by one": [
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_a_uniform_choice_costs_its_logarithm",
+        "test_symbols_and_uniform_choices_come_back_in_order"
+      ],
+      "parts not counted": [
+        "test_the_first_symbol_of_a_context_is_priced_by_the_prior",
+        "test_the_parts_add_up_to_the_file"
+      ],
+      "pending dropped": [
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_short_files_read_back",
+        "test_symbols_and_uniform_choices_come_back_in_order",
+        "test_the_parts_add_up_to_the_file"
+      ],
+      "pending same bit": [
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_short_files_read_back",
+        "test_symbols_and_uniform_choices_come_back_in_order"
+      ],
+      "no closing bits": [
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_short_files_read_back",
+        "test_symbols_and_uniform_choices_come_back_in_order"
+      ],
+      "trailing zeros kept": ["test_a_file_never_ends_in_a_zero_bit"],
+      "symbol range unchecked": ["test_values_outside_the_alphabet_are_refused"],
+      "uniform range unchecked": ["timeout after 60s"],
+      "contexts merged": ["test_contexts_learn_apart"],
+      "decoder past end reads one": ["test_short_files_read_back"],
+      "decoder target off": ["timeout after 60s"],
+      "decoder does not learn": [
+        "test_a_decoder_reads_zeros_past_the_end_of_the_file",
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_short_files_read_back",
+        "test_symbols_and_uniform_choices_come_back_in_order"
+      ],
+      "bit order flipped": [
+        "test_a_decoder_reads_zeros_past_the_end_of_the_file",
+        "test_a_file_never_ends_in_a_zero_bit",
+        "test_a_skewed_source_takes_about_its_entropy",
+        "test_short_files_read_back",
+        "test_symbols_and_uniform_choices_come_back_in_order"
+      ]
+    }
+  }
+}

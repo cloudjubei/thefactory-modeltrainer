@@ -1,0 +1,216 @@
+{
+  "file": "harness/strategy_file.py",
+  "tests": ["tests/test_strategy_file.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "reference rank off by one",
+      "old": "rank = None if at is None else at + 1",
+      "new": "rank = None if at is None else at + 2"
+    },
+    {
+      "name": "seen forgotten in the walk",
+      "old": "        s = stack.pop()\n        key = game.state_key(s)\n        if key in seen or game.is_terminal(s):\n            continue\n        seen.add(key)\n        if game.current_player(s) != player:\n            stack.extend(reversed([game.step(s, b) for b in game.legal_actions(s)]))\n            continue\n        node = None if source is None",
+      "new": "        s = stack.pop()\n        key = game.state_key(s)\n        if game.is_terminal(s):\n            continue\n        seen.add(key)\n        if game.current_player(s) != player:\n            stack.extend(reversed([game.step(s, b) for b in game.legal_actions(s)]))\n            continue\n        node = None if source is None"
+    },
+    {
+      "name": "cells frame ignored",
+      "old": "(\"cells\", (cell, cell in frame), 2,",
+      "new": "(\"cells\", cell, 2,"
+    },
+    {
+      "name": "level zero lost",
+      "old": "None if levels is None else levels[cell])",
+      "new": "None if levels is None else levels[cell] or 1)"
+    },
+    {
+      "name": "mirrored frame not imaged",
+      "old": "frame = set(facts.empty_cells(image(s) if mirrored else s))",
+      "new": "frame = set(facts.empty_cells(s))"
+    },
+    {
+      "name": "new map not remembered",
+      "old": "        if node is not None:\n            known[node[\"leaf\"]] = index\n",
+      "new": ""
+    },
+    {
+      "name": "empty map may be mirrored",
+      "old": "        if index == 0 and flag:\n            raise ValueError(\"the empty map is read one way\")\n",
+      "new": ""
+    },
+    {
+      "name": "mirrored exceptions allowed",
+      "old": "        if wanted:\n            raise ValueError(\"a mirrored reading has no exceptions\")\n",
+      "new": ""
+    },
+    {
+      "name": "no move to front",
+      "old": "    order.insert(0, index)\n",
+      "new": "    order.append(index)\n"
+    },
+    {
+      "name": "forced exception allowed",
+      "old": "            if fix is not None:\n                raise ValueError(f\"an exception at {key}, where the rule is forced: a decoder never reads one there\")\n",
+      "new": ""
+    },
+    {
+      "name": "map's move among the picks",
+      "old": "picks = [m for m in safe if m != move] if flagged else None",
+      "new": "picks = list(safe) if flagged else None"
+    },
+    {
+      "name": "flags at forced positions",
+      "old": "elif facts.of(s)[0] or len(safe) == 1:",
+      "new": "elif False:"
+    },
+    {
+      "name": "exception not recorded",
+      "old": "            out[key] = move\n",
+      "new": ""
+    },
+    {
+      "name": "excepted always walked",
+      "old": "if io.symbol(\"excepted\", (at == 0, index == 0), 2, None if node is None else int(bool(wanted))):",
+      "new": "if io.symbol(\"excepted\", (at == 0, index == 0), 2, None if node is None else 1):"
+    },
+    {
+      "name": "move among legal not safe",
+      "old": "        safe = facts.safe_moves(s)\n        move = safe[io.symbol(\"move\"",
+      "new": "        safe = list(game.legal_actions(s))\n        move = safe[io.symbol(\"move\""
+    },
+    {
+      "name": "trim ignores the mirror",
+      "old": "read = image(s) if node.get(\"mirrored\") else s\n        live",
+      "new": "read = s\n        live"
+    },
+    {
+      "name": "trim keeps everything",
+      "old": "maps = [{c: k for c, k in m.items() if c in live.get(i, ())} for i, m in enumerate(strategy[\"maps\"])]",
+      "new": "maps = [dict(m) for m in strategy[\"maps\"]]"
+    },
+    {
+      "name": "trim to first leaf only",
+      "old": "live.setdefault(node[\"leaf\"], set()).update(facts.empty_cells(read))",
+      "new": "live.setdefault(node[\"leaf\"], set(facts.empty_cells(read)))"
+    },
+    {
+      "name": "lost lines not seen",
+      "old": "won = won and game.winner(s) == player",
+      "new": "pass"
+    },
+    {
+      "name": "replay ignores the mirror",
+      "old": "    if node.get(\"mirrored\"):\n        levels = restrict(maps[node[\"leaf\"]], facts.empty_cells(board_image(cells)(state)))\n        return _mirrored_walk(facts, state, levels, n_levels, cap, cells)[\"won\"]\n",
+      "new": ""
+    },
+    {
+      "name": "replay drops exceptions",
+      "old": "node.get(\"exceptions\", {}), cap)[\"won\"]",
+      "new": "{}, cap)[\"won\"]"
+    },
+    {
+      "name": "replay trusts the top",
+      "old": "    if not found[\"won\"]:\n        return {\"won\": False, \"leaves\": len(leaves), \"reason\": \"lost line above the leaves\"}\n",
+      "new": ""
+    },
+    {
+      "name": "replay stops at the first leaf",
+      "old": "all(replay_leaf(facts, s, n, strategy[\"maps\"], n_levels, cap, cells) for s, n in leaves))",
+      "new": "all(replay_leaf(facts, s, n, strategy[\"maps\"], n_levels, cap, cells) for s, n in leaves[:0]))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-06T12:06:40+00:00",
+    "killed": 23,
+    "survived": [],
+    "killed_by": {
+      "reference rank off by one": [
+        "test_a_cell_s_context_is_whether_the_first_leaf_has_it_empty",
+        "test_a_decoded_winning_strategy_replays_as_won",
+        "test_a_leaf_without_exceptions_walks_nothing",
+        "test_a_level_of_zero_is_a_level",
+        "test_a_map_can_be_read_both_ways_and_is_paid_once",
+        "test_a_map_is_paid_once_however_many_leaves_play_it",
+        "test_a_map_may_level_a_cell_full_at_the_leaf_that_first_plays_it",
+        "test_a_mirrored_leaf_comes_back_mirrored",
+        "test_a_mirrored_map_s_first_leaf_is_read_on_the_mirrored_board",
+        "test_a_position_reached_twice_is_read_once",
+        "test_a_position_the_map_leaves_undefined_reads_an_exception_with_no_flag",
+        "test_an_exception_on_a_forced_position_is_refused",
+        "test_an_exception_playing_the_map_s_own_move_is_refused",
+        "test_an_undefined_position_with_no_exception_is_refused",
+        "test_exceptions_come_back_and_are_paid_only_where_a_decoder_reads_one",
+        "test_maps_come_back_in_first_use_order_however_the_source_numbers_them",
+        "test_moves_and_the_empty_map_come_back",
+        "test_the_empty_map_is_never_mirrored",
+        "test_the_file_is_as_long_as_its_parts",
+        "test_the_map_played_last_is_the_cheapest_to_name",
+        "test_the_only_safe_move_costs_no_move_bits"
+      ],
+      "seen forgotten in the walk": ["test_a_position_reached_twice_is_read_once"],
+      "cells frame ignored": [
+        "test_a_cell_s_context_is_whether_the_first_leaf_has_it_empty",
+        "test_a_mirrored_map_s_first_leaf_is_read_on_the_mirrored_board"
+      ],
+      "level zero lost": [
+        "test_a_level_of_zero_is_a_level",
+        "test_a_mirrored_leaf_comes_back_mirrored",
+        "test_maps_come_back_in_first_use_order_however_the_source_numbers_them"
+      ],
+      "mirrored frame not imaged": [
+        "test_a_mirrored_map_s_first_leaf_is_read_on_the_mirrored_board"
+      ],
+      "new map not remembered": [
+        "test_a_map_can_be_read_both_ways_and_is_paid_once",
+        "test_a_map_is_paid_once_however_many_leaves_play_it",
+        "test_maps_come_back_in_first_use_order_however_the_source_numbers_them",
+        "test_the_map_played_last_is_the_cheapest_to_name"
+      ],
+      "empty map may be mirrored": ["test_the_empty_map_is_never_mirrored"],
+      "mirrored exceptions allowed": ["test_a_mirrored_leaf_with_exceptions_is_refused"],
+      "no move to front": ["test_the_map_played_last_is_the_cheapest_to_name"],
+      "forced exception allowed": ["test_an_exception_on_a_forced_position_is_refused"],
+      "map's move among the picks": ["test_an_exception_playing_the_map_s_own_move_is_refused"],
+      "flags at forced positions": [
+        "test_a_position_the_map_leaves_undefined_reads_an_exception_with_no_flag",
+        "test_an_exception_on_a_forced_position_is_refused"
+      ],
+      "exception not recorded": [
+        "test_a_position_the_map_leaves_undefined_reads_an_exception_with_no_flag",
+        "test_exceptions_come_back_and_are_paid_only_where_a_decoder_reads_one"
+      ],
+      "excepted always walked": [
+        "test_a_cell_s_context_is_whether_the_first_leaf_has_it_empty",
+        "test_a_leaf_without_exceptions_walks_nothing",
+        "test_a_level_of_zero_is_a_level",
+        "test_a_map_can_be_read_both_ways_and_is_paid_once",
+        "test_a_map_may_level_a_cell_full_at_the_leaf_that_first_plays_it",
+        "test_a_position_reached_twice_is_read_once",
+        "test_maps_come_back_in_first_use_order_however_the_source_numbers_them",
+        "test_moves_and_the_empty_map_come_back"
+      ],
+      "move among legal not safe": [
+        "test_a_legal_move_that_is_not_safe_is_refused",
+        "test_the_only_safe_move_costs_no_move_bits"
+      ],
+      "trim ignores the mirror": ["test_trimming_reads_a_mirrored_leaf_on_the_mirrored_board"],
+      "trim keeps everything": [
+        "test_trimming_drops_cells_full_at_every_leaf_that_plays_the_map_and_no_other",
+        "test_trimming_keeps_the_strategy_s_nodes_and_map_numbers",
+        "test_trimming_reads_a_mirrored_leaf_on_the_mirrored_board"
+      ],
+      "trim to first leaf only": [
+        "test_trimming_drops_cells_full_at_every_leaf_that_plays_the_map_and_no_other",
+        "test_trimming_keeps_the_strategy_s_nodes_and_map_numbers"
+      ],
+      "lost lines not seen": [
+        "test_a_lost_line_above_the_leaves_fails_the_replay",
+        "test_leaf_states_finds_a_lost_line"
+      ],
+      "replay ignores the mirror": ["test_a_mirrored_leaf_is_played_on_the_mirrored_board"],
+      "replay drops exceptions": ["test_an_exception_can_save_a_leaf"],
+      "replay trusts the top": ["test_a_lost_line_above_the_leaves_fails_the_replay"],
+      "replay stops at the first leaf": ["test_a_leaf_that_loses_fails_the_replay"]
+    }
+  }
+}

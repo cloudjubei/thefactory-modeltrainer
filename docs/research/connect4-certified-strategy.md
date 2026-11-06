@@ -1,6 +1,6 @@
-# A certified first-player strategy for Connect-4 in 162,752 bits
+# A certified first-player strategy for Connect-4 in 130,005 bits
 
-Write-up, 2026-10-29, updated 2026-11-06 (Z2). Question: how small can a complete, certified description of a winning first-player strategy for
+Write-up, 2026-10-29, updated 2026-11-06 (T1). Question: how small can a complete, certified description of a winning first-player strategy for
 Connect-4 (7×6) be, if a generic process finds it? Each claim cited as hNNN is a registered claim in
 `examples/boardgames/hypotheses.json`, with its proof test and evidence file. A claim marked *after the data* was written
 once the run had finished; every other headline claim was registered before its run started, except h373, which was
@@ -11,14 +11,29 @@ the data.
 
 ## 1. Result
 
-1. **A certified winning strategy for the first player, from the empty board, in 162,752 bits (about 20.3 KB)** (G4, U1, Z1, X2, X3, U2, Z2;
-   h358, h360, h363, h367, h369, h373, h375, h377, h378). It is G3's whole game (280,640 bits; h324, h326) with 50 of its 148 ply-6 subtrees replaced
+1. **A certified winning strategy for the first player, from the empty board, in one file of 130,005 bits (16,251 bytes)**
+   (T1; h379, h380, h382). The file reads back from its bytes alone to exactly the strategy written, and that strategy,
+   played by the run against every reply, wins all 3,372 leaves' lines. The decoder is given the game's rules, the map
+   rule's settings and the board's mirror; none of those, nor the decoder itself, is in the 130,005. By part:
+
+   | Part | Bits | Share | In the count |
+   |---|---|---|---|
+   | 1,052 maps: which of the cells hold a level (31,674) and the levels of their 19,715 cells (57,615) | 89,289 | 68.7% | 99,613 |
+   | 1,625 exceptions on 129 leaves | 21,051 | 16.2% | 21,815 |
+   | The tree: 4,052 positions, 680 moves, 3,372 leaves, their references and readings | 19,663 | 15.1% | 41,324 |
+   | The coder's ending and rounding | 2 | | |
+   | **Total** | **130,005** | | **162,752** |
+
+   The file is the whole game below, which every earlier size in this write-up counted rather than wrote: 0.7988 of the
+   count, with 21,661 of the 32,747 bits saved in the tree (h382, after the data). What the count pays and leaves out is in §2.
+
+   The game is G3's whole game (280,640 bits; h324, h326) with 50 of its 148 ply-6 subtrees replaced
    by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 76 of the 416 ply-8 strategies rebuilt from every
    map that game holds (G4; §6), 20 of the 50 ply-6 strategies rebuilt the same way (Z1; §6), 9 ply-6 and 48
    ply-8 strategies rebuilt with every map also readable on the mirrored board (X2, X3; §6), 9 more ply-6 strategies rebuilt
    from every map the game then held, read both ways (Z2; §6), and 3 ply-8 strategies from the
    control run with that reading off (X4; §6). U2's search chose among all of those pieces at once. It plays every reply the opponent can make, and every piece passed
-   an independent walk confirming that it wins every line. The assembled game, by part:
+   an independent walk confirming that it wins every line. The assembled game, by how it was built, as counted:
 
    | Part | Bits | Share |
    |---|---|---|
@@ -43,9 +58,9 @@ the data.
 
    | Description | Bits | vs this result |
    |---|---|---|
-   | The repo's policy net (not certified) | ~660,000 | 4.1x larger |
-   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.8x smaller |
-   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 3.6–4.7x smaller |
+   | The repo's policy net (not certified) | ~660,000 | 5.1x larger |
+   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.4x smaller |
+   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 2.9–3.7x smaller |
 
    WeakC4 uses a Connect-4-specific language (see §6, option 4). Every rule here is generic: nothing in it knows about
    gravity, columns or threats beyond "a move that wins now" and "a move that lets the opponent win now". The mirror a
@@ -56,7 +71,10 @@ the data.
 The evidence for G3 is `examples/boardgames/evidence/c49_g3.json.gz`, and `harness/floor_g3.py` (`g3_size`)
 recomputes its total from it. The assembled game is recomputed by `tests/test_c49_z2_evidence.py`
 (`harness/floor_z2.py`: U2's local search over every certified piece, from U2's game and from every position's smallest
-piece) from G3 and the E1, O1, E3, V1, V2, G4, Z1, X2, X3, X4 and Z2 evidence files.
+piece) from G3 and the E1, O1, E3, V1, V2, G4, Z1, X2, X3, X4 and Z2 evidence files. The file is in
+`examples/boardgames/evidence/c49_t1.json.gz`, written and played by `scripts/c4_strategy_file.py`.
+`tests/test_c49_t1_evidence.py` decodes it from its bytes, assembles the game again, compares the two and encodes the game
+back to the same bytes; the replay of every line is the run's, recorded in that file.
 
 ---
 
@@ -91,6 +109,14 @@ play instead. They are coded in the order a decoder replays the leaf, with flags
   (first_use coding; h312).
 - **Library:** maps shared across positions form a library, and each library map some leaf plays is paid once for the
   whole game. In X2's rebuilds the library's reference list holds each map twice, once per reading.
+
+**The count and the file.** Every size in §3 and §4 is a count: it adds up what the parts would take, and no file of
+that length was ever written. A map's count pays one bit for each cell empty where the map was found, a position the
+assembled game never states, and the count pays nothing for telling a piece from a position the empty map wins or for
+saying which list a piece's references point into. T1 writes the game instead (`harness/strategy_file.py`,
+`harness/arithmetic_coding.py`): one walk from the empty board, in the same order for writing and reading, with adaptive
+arithmetic coding that uses only what a decoder knows at that point. A position reached by two pieces is written once,
+and each map is trimmed to the cells empty at some leaf that plays it, since a leaf reads no other cell.
 
 **Certification.** Every leaf's map is verified over every continuation by a solver-free walk, then certified a
 second time independently. `check` re-walks the whole strategy against every reply with no oracle, and the oracle
@@ -138,6 +164,7 @@ ply 10.
 | X3 | The 409 ply-8 strategies rebuilt from the same maps read both ways; 71 taken | 166,623 | 0.950 | h368–h370 |
 | U2 | No new builds: every certified piece an option at its position, X4's control rebuilds included; 49 positions change | 165,023 | 0.990 | h373, h375 |
 | Z2 | The 50 ply-6 builds of U2's game, rebuilt with both readings from every map it holds, chosen by U2's search; 9 taken | 162,752 | 0.986 | h376–h378 |
+| T1 | No new builds: Z2's game written as one file, read back from its bytes and played against every reply | 130,005 (file) | 0.799 | h379, h380, h382 |
 
 The whole-game passes stop at G3 by a rule set before it ran: pass again only while a pass gains a tenth. G4 and Z1 are
 library passes over the assembled game instead, each judged against its own 97/100 bar: G4 cleared it, Z1 fell short.
@@ -318,6 +345,15 @@ if new.
   larger. The search takes 9, eight of the smaller and #118, which is larger, and moves 4 ply-8 strategies to G4's piece. The
   builds fall to 41,776 and the library to 70,435 (801 maps, 7 of them beyond X2's list), and the strategies rise to 49,692
   (h378, after the data). The two starts disagree, so 162,752 is again a local best.
+- **The game written as a file (T1, measured):** The count's map cost rests on positions the game never states (§2). So
+  Z2's game was written as one file, in a code using only what a decoder knows, with both claims registered before any
+  file of that game existed. It reads back with 0 differences and every line of what it reads wins, over 3,372 leaves
+  (h379). It takes 130,005 bits, under the bar of 9/10 of 162,752 (h380). The levels are
+  the largest part, 57,615 bits, 2.92 a cell of the 3 a level can take; the cells 31,674, the exception flags 17,884 and
+  the references 15,339 follow. 514 of the 1,052 maps are read once and 616 of the 3,372 leaves play the empty map
+  (h382, after the data). Before it ran, the same code had written G3's game in 225,678 bits against 280,640 counted, a dry
+  run seen when the bar was set. The pieces were chosen against the count, not the file, so the search has never seen
+  what a piece costs in the file.
 
 ---
 

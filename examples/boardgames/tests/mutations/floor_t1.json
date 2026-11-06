@@ -1,0 +1,185 @@
+{
+  "file": "harness/floor_t1.py",
+  "tests": ["tests/test_floor_t1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "mirror not flipped",
+      "old": "return [r * cols + cols - 1 - c for r in range(rows) for c in range(cols)]",
+      "new": "return [r * cols + c for r in range(rows) for c in range(cols)]"
+    },
+    {
+      "name": "rule mismatch allowed",
+      "old": "    if any(r != rules[0] for r in rules):\n        raise ValueError(\"the pieces were not built under one rule\")\n",
+      "new": ""
+    },
+    {
+      "name": "n_levels outside the rule",
+      "old": "rules = [{**{k: b.get(k, v) for k, v in RULE_DEFAULTS.items()}, \"n_levels\": b[\"n_levels\"]} for b in builders]",
+      "new": "rules = [{**{k: b.get(k, v) for k, v in RULE_DEFAULTS.items()}, \"n_levels\": 8} for b in builders]"
+    },
+    {
+      "name": "two pieces at a position",
+      "old": "        if key in pieces:\n            raise ValueError(f\"two pieces at {key}\")\n",
+      "new": ""
+    },
+    {
+      "name": "mirror by run ignored",
+      "old": "pieces[key] = (r, mirrors[name])",
+      "new": "pieces[key] = (r, False)"
+    },
+    {
+      "name": "every library id mirrored",
+      "old": "half = row[\"shared\"] // 2 if mirror else 0",
+      "new": "half = row[\"shared\"] if mirror else 0"
+    },
+    {
+      "name": "a non-mirror run reads mirrored",
+      "old": "half = row[\"shared\"] // 2 if mirror else 0",
+      "new": "half = row[\"shared\"] // 2"
+    },
+    {
+      "name": "equal maps kept apart",
+      "old": "        if content not in ids:\n            ids[content] = len(maps)",
+      "new": "        if True:\n            ids[content] = len(maps)"
+    },
+    {
+      "name": "exceptions dropped",
+      "old": "        if node.get(\"exceptions\"):\n            read[\"exceptions\"] = {(tuple(b), t): m for b, t, m in node[\"exceptions\"]}\n",
+      "new": ""
+    },
+    {
+      "name": "piece root ignored",
+      "old": "        if piece is None and key in read:\n            piece = read[key]\n",
+      "new": ""
+    },
+    {
+      "name": "piece lost below a move",
+      "old": "stack.append((game.step(s, node[\"move\"]), piece))",
+      "new": "stack.append((game.step(s, node[\"move\"]), None))"
+    },
+    {
+      "name": "piece lost below a reply",
+      "old": "stack.extend(reversed([(game.step(s, b), piece) for b in game.legal_actions(s)]))",
+      "new": "stack.extend(reversed([(game.step(s, b), None) for b in game.legal_actions(s)]))"
+    },
+    {
+      "name": "uncovered position trivial",
+      "old": "        elif key in opening[\"trivial\"]:\n            node = {\"leaf\": 0}\n        else:\n            raise KeyError(key)\n",
+      "new": "        else:\n            node = {\"leaf\": 0}\n"
+    },
+    {
+      "name": "differences ignore the mirror",
+      "old": "return (\"leaf\", tuple(sorted(maps[node[\"leaf\"]].items())), bool(node.get(\"mirrored\")),",
+      "new": "return (\"leaf\", tuple(sorted(maps[node[\"leaf\"]].items())), False,"
+    },
+    {
+      "name": "differences ignore exceptions",
+      "old": "tuple(sorted(node.get(\"exceptions\", {}).items())))",
+      "new": "())"
+    },
+    {
+      "name": "differences by map number",
+      "old": "return (\"leaf\", tuple(sorted(maps[node[\"leaf\"]].items())),",
+      "new": "return (\"leaf\", node[\"leaf\"],"
+    },
+    {
+      "name": "differences ignore missing nodes",
+      "old": "keys = set(written[\"nodes\"]) | set(read[\"nodes\"])",
+      "new": "keys = set(written[\"nodes\"]) & set(read[\"nodes\"])"
+    },
+    {
+      "name": "spec unchecked",
+      "old": "    if e.get(\"spec\") != \"harness.floor_t1\":\n        return {\"decoded\": \"not_run\", \"size\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "length unchecked",
+      "old": "if (read[\"bits\"] != e[\"bits\"] or read[\"differences\"]",
+      "new": "if (read[\"differences\"]"
+    },
+    {
+      "name": "differences unchecked",
+      "old": "read[\"differences\"] or not replay[\"won\"]",
+      "new": "not replay[\"won\"]"
+    },
+    {
+      "name": "replay unchecked",
+      "old": "or not replay[\"won\"] or replay[\"leaves\"]",
+      "new": "or replay[\"leaves\"]"
+    },
+    {
+      "name": "replay's leaves unchecked",
+      "old": " or replay[\"leaves\"] != read[\"leaves\"]):",
+      "new": "):"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "\"supported\" if den * bits <= num * control",
+      "new": "\"supported\" if den * bits < num * control"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "\"refuted\" if rden * bits >= rnum * control",
+      "new": "\"refuted\" if rden * bits > rnum * control"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-06T12:06:58+00:00",
+    "killed": 24,
+    "survived": [],
+    "killed_by": {
+      "mirror not flipped": ["test_the_mirror_flips_columns"],
+      "rule mismatch allowed": ["test_the_rule_must_be_one_rule"],
+      "n_levels outside the rule": ["test_the_rule_must_be_one_rule"],
+      "two pieces at a position": ["test_two_pieces_at_one_position_are_refused"],
+      "mirror by run ignored": ["test_each_piece_reads_by_its_run_s_mirror"],
+      "every library id mirrored": [
+        "test_only_a_mirror_run_s_first_half_of_the_library_reads_mirrored"
+      ],
+      "a non-mirror run reads mirrored": [
+        "test_only_a_mirror_run_s_first_half_of_the_library_reads_mirrored"
+      ],
+      "equal maps kept apart": [
+        "test_a_position_two_pieces_reach_takes_the_first_piece_s_node",
+        "test_equal_maps_from_different_pieces_are_one_map",
+        "test_exceptions_are_read_by_position"
+      ],
+      "exceptions dropped": ["test_exceptions_are_read_by_position"],
+      "piece root ignored": [
+        "test_a_piece_s_moves_are_followed_inside_the_piece",
+        "test_a_piece_takes_over_at_its_root",
+        "test_a_position_two_pieces_reach_takes_the_first_piece_s_node",
+        "test_equal_maps_from_different_pieces_are_one_map",
+        "test_exceptions_are_read_by_position",
+        "test_only_a_mirror_run_s_first_half_of_the_library_reads_mirrored"
+      ],
+      "piece lost below a move": [
+        "test_a_piece_s_moves_are_followed_inside_the_piece",
+        "test_a_position_two_pieces_reach_takes_the_first_piece_s_node"
+      ],
+      "piece lost below a reply": [
+        "test_a_piece_s_moves_are_followed_inside_the_piece",
+        "test_a_position_two_pieces_reach_takes_the_first_piece_s_node"
+      ],
+      "uncovered position trivial": ["test_a_position_neither_opening_nor_piece_covers_raises"],
+      "differences ignore the mirror": ["test_differences_count_every_kind_of_change"],
+      "differences ignore exceptions": ["test_differences_count_every_kind_of_change"],
+      "differences by map number": [
+        "test_differences_compare_content_not_map_numbers",
+        "test_differences_count_every_kind_of_change"
+      ],
+      "differences ignore missing nodes": ["test_differences_count_every_kind_of_change"],
+      "spec unchecked": ["test_a_run_off_its_spec_is_not_run"],
+      "length unchecked": ["test_a_file_of_another_length_refutes"],
+      "differences unchecked": ["test_a_file_that_reads_back_differently_refutes"],
+      "replay unchecked": [
+        "test_a_file_that_fails_to_decode_has_no_size",
+        "test_a_lost_replay_refutes"
+      ],
+      "replay's leaves unchecked": ["test_a_replay_of_other_leaves_refutes"],
+      "support bar exclusive": ["test_the_size_bars_are_inclusive"],
+      "refute bar exclusive": ["test_the_size_bars_are_inclusive"]
+    }
+  }
+}

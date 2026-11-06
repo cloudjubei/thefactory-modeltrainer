@@ -11292,6 +11292,112 @@
         "harness/floor_x4.py": "55200a75a76025733b257dbd0d75357c3f78cb0d4e186cb08c42a3bec91e5a85",
         "harness/floor_x3.py": "2245112371f5a1e2f7b86e6854d90e350b1845efae89e0eedce9c3b2ecca3e3e"
       }
+    },
+    "h379": {
+      "id": "h379",
+      "claim": "\u00a73.6 T1: Z2's whole game written as one file (harness.strategy_file through harness.arithmetic_coding, a position reached twice read once, each map trimmed to the cells empty at some leaf playing it) reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to exactly the strategy written, and that strategy played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_file_reads_back_to_the_game_and_every_line_wins",
+      "note": "Seen before registering: a rough strict library count on Z2's game in scratch (73,025 bits against 70,435), and T1's dry run on G3's game (225,678 bits against 280,640). No file of Z2's game exists yet.",
+      "registered_at": "2026-11-06T12:07:10.764209+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_file_reads_back_to_the_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3580.60s (0:59:40)",
+          "drawn_at": "2026-11-06T15:13:33.117035+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t1.json.gz",
+        "started": "2026-11-06T12:07:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t1_evidence.py": "8dba98e12e4c40a36017119a84b305975a77619bb3d3f410d6bc8a5fbb4a29be",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a",
+        "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781",
+        "scripts/c4_strategy_file.py": "97fe65d933c8d108e092dc00c455a44f982d6bebc140f9e1d4fd1c8c7f2e2ae2"
+      },
+      "inconclusive_proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_reading_is_undecidable"
+    },
+    "h380": {
+      "id": "h380",
+      "claim": "\u00a73.6 T1: that file takes 9/10 of the 162,752 bits Z2's game was counted at or less (146,476 bits); all of them or more refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_file_takes_9_10_of_162_752_bits_or_less",
+      "note": "Seen before registering: a rough strict library count on Z2's game in scratch (73,025 bits against 70,435), and T1's dry run on G3's game (225,678 bits against 280,640). No file of Z2's game exists yet.",
+      "registered_at": "2026-11-06T12:07:11.129025+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_file_takes_9_10_of_162_752_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3357.00s (0:55:57)",
+          "drawn_at": "2026-11-06T16:09:44.594807+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t1.json.gz",
+        "started": "2026-11-06T12:07:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t1_evidence.py": "8dba98e12e4c40a36017119a84b305975a77619bb3d3f410d6bc8a5fbb4a29be",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a",
+        "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781",
+        "scripts/c4_strategy_file.py": "97fe65d933c8d108e092dc00c455a44f982d6bebc140f9e1d4fd1c8c7f2e2ae2"
+      },
+      "inconclusive_proof": "tests/test_c49_t1_evidence.py::test_c49_t1_the_size_is_undecidable"
+    },
+    "h381": {
+      "id": "h381",
+      "claim": "\u00a73.6 T1 (after the data): the file takes 130,005 bits (16,251 bytes), 0.7988 of the 162,752 the game was counted at. Read from its bytes it holds 4,052 positions, 680 moves and 3,372 leaves (616 on the empty map, 43 reading a map mirrored, 129 with 1,625 exceptions) and 1,052 maps of 19,715 cells, 514 read once. Maps take 89,289 bits against the count's 99,613, exceptions 21,051 against 21,815, the tree 19,663 against 41,324: 21,661 of the 32,747 bits saved are the tree's. The levels are the largest part, 57,615 bits, 2.92 a cell.",
+      "mode": "test",
+      "proof": "tests/test_c49_t1_after_evidence.py::test_c49_t1_the_file_takes_130_005_bits_and_two_thirds_of_what_it_saves_is_the_tree",
+      "note": "",
+      "registered_at": "2026-11-06T16:10:00.381011+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_t1.json.gz",
+        "started": "2026-11-06T12:07:17+00:00"
+      },
+      "pins": {
+        "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781"
+      },
+      "supersession": {
+        "by": "h382",
+        "reason": "Registered with one pin because --pins takes a comma-separated list; never run. h382 is the same claim with all five pins.",
+        "at": "2026-11-06T16:59:03.915151+00:00"
+      }
+    },
+    "h382": {
+      "id": "h382",
+      "claim": "\u00a73.6 T1 (after the data): the file takes 130,005 bits (16,251 bytes), 0.7988 of the 162,752 the game was counted at. Read from its bytes it holds 4,052 positions, 680 moves and 3,372 leaves (616 on the empty map, 43 reading a map mirrored, 129 with 1,625 exceptions) and 1,052 maps of 19,715 cells, 514 read once. Maps take 89,289 bits against the count's 99,613, exceptions 21,051 against 21,815, the tree 19,663 against 41,324: 21,661 of the 32,747 bits saved are the tree's. The levels are the largest part, 57,615 bits, 2.92 a cell.",
+      "mode": "test",
+      "proof": "tests/test_c49_t1_after_evidence.py::test_c49_t1_the_file_takes_130_005_bits_and_two_thirds_of_what_it_saves_is_the_tree",
+      "note": "Same claim as h381, which was registered with one pin because --pins takes a comma-separated list.",
+      "registered_at": "2026-11-06T16:10:18.305646+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t1_after_evidence.py::test_c49_t1_the_file_takes_130_005_bits_and_two_thirds_of_what_it_saves_is_the_tree",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2901.02s (0:48:21)",
+          "drawn_at": "2026-11-06T16:58:51.700278+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t1.json.gz",
+        "started": "2026-11-06T12:07:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t1_after_evidence.py": "ef8e8a3a6d95b5c28cc789a7beff0b41835a962f823d65d3d7a4d1d47d5b2845",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a",
+        "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781"
+      }
     }
   }
 }
