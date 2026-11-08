@@ -11486,6 +11486,140 @@
         "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
         "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
       }
+    },
+    "h386": {
+      "id": "h386",
+      "claim": "\u00a73.6 T3: T2's game written again with each map's levels coded under the highest level read so far in the map, the cell's row and whether the cell below holds a level (harness.level_context over harness.strategy_file) makes exactly the file's bytes, reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to T2's game, and played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_file_reads_back_to_t2_s_game_and_every_line_wins",
+      "note": "Seen before registering: 17 level contexts simulated on G3's T2 dry-run file (the chosen one 76,981 to 72,644 bits of levels); T3's dry run on that file, 204,454 bits to 200,115 (0.979), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T2 file was not re-encoded with any context.",
+      "registered_at": "2026-11-08T18:49:36.591012+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_file_reads_back_to_t2_s_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1492.33s (0:24:52)",
+          "drawn_at": "2026-11-08T19:59:53.695410+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t3.json.gz",
+        "started": "2026-11-08T18:49:52+00:00"
+      },
+      "pins": {
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t3.py": "940163a7cd61605d564d1fa0e6d11ef95a7c7a9732b96334825a647895e30ecb",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_level_context.py": "b7e64f96725eb933b16104e2ec52829ba24ad79f7171b5c7d1edf09acb3a158c",
+        "tests/test_c49_t3_evidence.py": "79b0589d449e1fefe7d98ab5be857d2599289a2fc48afb7bde7a66bf58c7fccf",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_reading_is_undecidable"
+    },
+    "h387": {
+      "id": "h387",
+      "claim": "\u00a73.6 T3: that file takes 99/100 of T2's 118,197 bits or less (117,015 bits); 999/1000 of them or more (118,079) refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_file_takes_99_100_of_118_197_bits_or_less",
+      "note": "Seen before registering: 17 level contexts simulated on G3's T2 dry-run file (the chosen one 76,981 to 72,644 bits of levels); T3's dry run on that file, 204,454 bits to 200,115 (0.979), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T2 file was not re-encoded with any context.",
+      "registered_at": "2026-11-08T18:49:45.132801+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_file_takes_99_100_of_118_197_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1745.90s (0:29:05)",
+          "drawn_at": "2026-11-08T20:29:15.288075+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t3.json.gz",
+        "started": "2026-11-08T18:49:52+00:00"
+      },
+      "pins": {
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t3.py": "940163a7cd61605d564d1fa0e6d11ef95a7c7a9732b96334825a647895e30ecb",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_level_context.py": "b7e64f96725eb933b16104e2ec52829ba24ad79f7171b5c7d1edf09acb3a158c",
+        "tests/test_c49_t3_evidence.py": "79b0589d449e1fefe7d98ab5be857d2599289a2fc48afb7bde7a66bf58c7fccf",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t3_evidence.py::test_c49_t3_the_size_is_undecidable"
+    },
+    "h388": {
+      "id": "h388",
+      "claim": "\u00a73.6 T3 (after the data): the file takes 115,599 bits (14,450 bytes), 0.9780 of T2's 118,197. Every part but the levels is T2's to a tenth of a bit; the levels take 43,495.5 bits against 46,095.6, 2.36 a cell of the 18,444 against 2.50, 5.6% fewer, the share the same context saved on G3's T2 file in the dry run (76,981 to 72,644).",
+      "mode": "test",
+      "proof": "tests/test_c49_t3_after_evidence.py::test_c49_t3_the_file_takes_115_599_bits_and_only_the_levels_changed",
+      "note": "Written from the run's log and evidence after h386 and h387 were judged.",
+      "registered_at": "2026-11-08T20:29:34.001079+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t3_after_evidence.py::test_c49_t3_the_file_takes_115_599_bits_and_only_the_levels_changed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.20s",
+          "drawn_at": "2026-11-08T20:29:34.516228+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t3.json.gz",
+        "started": "2026-11-08T18:49:52+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t3_after_evidence.py": "46c958da0775ef2ae376e213d7c6441f2169d922b19705ea85b02d92fd866645",
+        "tests/test_c49_t3_evidence.py": "79b0589d449e1fefe7d98ab5be857d2599289a2fc48afb7bde7a66bf58c7fccf",
+        "harness/floor_t3.py": "940163a7cd61605d564d1fa0e6d11ef95a7c7a9732b96334825a647895e30ecb",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d"
+      }
+    },
+    "h389": {
+      "id": "h389",
+      "claim": "\u00a73.6 T4: T3's game written again with each map's cell flags also coded under the cell, whether it is empty at the leaf that first reads the map, and for each of the two cells below whether that cell is empty and holds a level (harness.cell_context under harness.level_context over harness.strategy_file) makes exactly the file's bytes, reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to T3's game, and played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_reads_back_to_t3_s_game_and_every_line_wins",
+      "note": "Seen before registering: 29 flag contexts simulated on G3's T2 dry-run file (the chosen one 51,994 to 46,828 bits of flags); T4's dry run on G3's T3 file, 200,115 bits to 194,950 (0.974), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T3 file was not re-encoded with any flag context.",
+      "registered_at": "2026-11-08T22:40:44.255715+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_t4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/floor_t4.py": "e365d5adfc6fb402316b8c6d680e50fcd653becd20f54f76cb3647c9763ff1e6",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_cell_context.py": "1e39859a0f0e2984dfc1f7119a4328e5bcca08c0f4d16a3d4e18de6f8d1fe0be",
+        "tests/test_c49_t4_evidence.py": "59fb6baa49dac23c6abd05745774cff879d33235121f2a42d393f3c65940ccc5",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_reading_is_undecidable"
+    },
+    "h390": {
+      "id": "h390",
+      "claim": "\u00a73.6 T4: that file takes 99/100 of T3's 115,599 bits or less (114,443 bits); 999/1000 of them or more (115,484) refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_takes_99_100_of_115_599_bits_or_less",
+      "note": "Seen before registering: 29 flag contexts simulated on G3's T2 dry-run file (the chosen one 51,994 to 46,828 bits of flags); T4's dry run on G3's T3 file, 200,115 bits to 194,950 (0.974), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T3 file was not re-encoded with any flag context.",
+      "registered_at": "2026-11-08T22:40:53.331912+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_t4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/floor_t4.py": "e365d5adfc6fb402316b8c6d680e50fcd653becd20f54f76cb3647c9763ff1e6",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_cell_context.py": "1e39859a0f0e2984dfc1f7119a4328e5bcca08c0f4d16a3d4e18de6f8d1fe0be",
+        "tests/test_c49_t4_evidence.py": "59fb6baa49dac23c6abd05745774cff879d33235121f2a42d393f3c65940ccc5",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_size_is_undecidable"
     }
   }
 }

@@ -6282,3 +6282,32 @@ the 1,841 pieces the search could take was priced with the coder's final counts 
 lowest levels their leaves need, a map shared by pieces paid once. That stand-in came within about 3% of the real file on
 Z2's game, and U2's search driven by it moved 18 of 819 positions for about 1.4% (a scratch estimate, never proven).
 Inside the stand-in's own error, so the user dropped it for T3, a richer context for the levels.
+
+T3 built 2026-11-08. `harness/level_context.py` wraps strategy_file's encoder or decoder and codes each level under the
+highest level read so far in its map, the cell's row and whether the cell below holds a level, every other call passed
+on unchanged; strategy_file itself, pinned by T1's and T2's claims, is untouched. On G3's T2 dry-run file (1,737 maps of
+31,067 cells) 17 contexts were simulated with the coder's own counts: the cell alone, today's, gives the file's 76,981
+exactly; the highest level so far alone 76,364; with the row 74,042; with the row and the cell below 72,644, the best;
+adding the cell to the left, the level read last or a count made it worse. The row and the cell below come from the
+game's board shape, the knowledge the mirror already uses; nothing in it is about Connect-4's play. 16 tests, 30/30
+mutants. Dry run of `scripts/c4_level_context.py` on G3's T2 file: 204,454 bits to 200,115 (0.979), levels 72,644, 0
+differences.
+
+T3 registered 2026-11-08 (pre-registered h386, the read-back and replay, and h387, 99/100 of 118,197 or less supports and
+999/1000 refutes), after the proof's path was run on G3's dry-run files (supported).
+
+T3 result 2026-11-08 (h386, h387 supported — pre-registered; h388 after the data). The file takes 115,599 bits, 14,450
+bytes, 0.9780 of T2's 118,197, past the 99/100 bar (117,015). It reads back from its bytes alone to T2's game with 0
+differences, and the run's replay won every line of all 3,372 leaves. 18:50Z–19:35Z on 7 workers. Every part but the
+levels is T2's to a tenth of a bit; the levels take 43,495.5 bits against 46,095.6, 2.36 a cell of the 18,444 against
+2.50, 5.6% fewer, the share the same context saved on G3's T2 file in the dry run.
+
+T4 built 2026-11-08, the user's choice after T3: which cells a map levels, coded in context. On G3's T2 dry-run file
+every flag call was logged (1,737 maps, 42 flags each, with whether the cell is empty at the first leaf reading the map)
+and 29 contexts simulated with the coder's counts; today's, the cell and that emptiness, gives the file's 51,994
+exactly. The row alone, a count of cells levelled so far or the cell to the left did little or worse. The column below
+did the work: with whether the cell below holds a level 51,318; the two cells below 48,643; with whether each of them
+is empty 46,828, the best; three or five cells below were worse (47,017, 47,425). `harness/cell_context.py` is a second
+wrapper, under T3's, so T4's file carries both contexts; level_context, pinned by T3's claims, is untouched. 16 tests;
+33/33 mutants after three gaps closed (a board with three cells below a cell, a second map reading the first map's
+flags, levels that kept T3's context only by chance of equal costs).

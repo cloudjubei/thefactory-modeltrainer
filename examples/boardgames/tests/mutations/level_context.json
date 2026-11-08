@@ -1,0 +1,161 @@
+{
+  "file": "harness/level_context.py",
+  "tests": ["tests/test_level_context.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "no highest level",
+      "old": "return max(done.values(), default=-1), cell // cols, cell - cols in done",
+      "new": "return -1, cell // cols, cell - cols in done"
+    },
+    {
+      "name": "lowest not highest",
+      "old": "max(done.values(), default=-1)",
+      "new": "min(done.values(), default=-1)"
+    },
+    {
+      "name": "no row",
+      "old": ", cell // cols, ",
+      "new": ", 0, "
+    },
+    {
+      "name": "column not row",
+      "old": ", cell // cols, ",
+      "new": ", cell % cols, "
+    },
+    {
+      "name": "no cell below",
+      "old": "cell - cols in done",
+      "new": "False"
+    },
+    {
+      "name": "cell above",
+      "old": "cell - cols in done",
+      "new": "cell + cols in done"
+    },
+    {
+      "name": "cell to the left",
+      "old": "cell - cols in done",
+      "new": "cell - 1 in done"
+    },
+    {
+      "name": "level not remembered",
+      "old": "            self.done[context] = value\n",
+      "new": ""
+    },
+    {
+      "name": "map not started afresh",
+      "old": "            self.done = {}\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "afresh at every cell",
+      "old": "if family == \"cells\" and context[0] == 0:",
+      "new": "if family == \"cells\":"
+    },
+    {
+      "name": "levels under their cell",
+      "old": "self.io.symbol(family, level_context(context, self.done, self.cols), n, value)",
+      "new": "self.io.symbol(family, context, n, value)"
+    },
+    {
+      "name": "level value not passed",
+      "old": "level_context(context, self.done, self.cols), n, value)",
+      "new": "level_context(context, self.done, self.cols), n, 0)"
+    },
+    {
+      "name": "uniform's value dropped",
+      "old": "return self.io.uniform(family, n, value)",
+      "new": "return self.io.uniform(family, n, 0)"
+    },
+    {
+      "name": "width from the height",
+      "old": "facts.game.board_shape[1]), facts, root, n_levels, cells, source)",
+      "new": "facts.game.board_shape[0] + 1), facts, root, n_levels, cells, source)"
+    },
+    {
+      "name": "decoder's width from the height",
+      "old": "code_strategy(LevelContext(Decoder(data), facts.game.board_shape[1])",
+      "new": "code_strategy(LevelContext(Decoder(data), facts.game.board_shape[0] + 1)"
+    },
+    {
+      "name": "parts dropped",
+      "old": "return data, bits, io.parts",
+      "new": "return data, bits, {}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-08T17:38:53+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "no highest level": [
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "lowest not highest": [
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "no row": [
+        "test_a_decoder_reading_another_width_does_not_read_the_strategy_back",
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "column not row": [
+        "test_a_decoder_reading_another_width_does_not_read_the_strategy_back",
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_levels_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ],
+      "no cell below": [
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "cell above": [
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "cell to the left": [
+        "test_a_level_reads_the_highest_level_so_far_its_row_and_the_cell_below",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "level not remembered": [
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "map not started afresh": [
+        "test_a_decoder_reading_another_width_does_not_read_the_strategy_back",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_levels_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ],
+      "afresh at every cell": [
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "levels under their cell": [
+        "test_a_decoder_reading_another_width_does_not_read_the_strategy_back",
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_levels_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ],
+      "level value not passed": [
+        "test_each_level_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_every_other_call_is_strategy_file_s_own",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[source0]",
+        "test_the_strategy_reads_back_from_the_bytes[source1]"
+      ],
+      "uniform's value dropped": [
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[source0]"
+      ],
+      "width from the height": [
+        "test_a_decoder_reading_another_width_does_not_read_the_strategy_back",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[source0]"
+      ],
+      "decoder's width from the height": ["test_the_strategy_reads_back_from_the_bytes[source0]"],
+      "parts dropped": [
+        "test_levels_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ]
+    }
+  }
+}

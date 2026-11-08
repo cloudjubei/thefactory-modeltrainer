@@ -1,0 +1,188 @@
+{
+  "file": "harness/cell_context.py",
+  "tests": ["tests/test_cell_context.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "one cell below",
+      "old": "BELOW = 2",
+      "new": "BELOW = 1"
+    },
+    {
+      "name": "three cells below",
+      "old": "BELOW = 2",
+      "new": "BELOW = 3"
+    },
+    {
+      "name": "below not empty-read",
+      "old": "under = tuple((frame[c], c in levelled)",
+      "new": "under = tuple((True, c in levelled)"
+    },
+    {
+      "name": "below not level-read",
+      "old": "under = tuple((frame[c], c in levelled)",
+      "new": "under = tuple((frame[c], False)"
+    },
+    {
+      "name": "cells above",
+      "old": "(cell - k * cols for k in range(1, BELOW + 1)) if c >= 0",
+      "new": "(cell + k * cols for k in range(1, BELOW + 1)) if c in frame"
+    },
+    {
+      "name": "cells to the left",
+      "old": "(cell - k * cols for k in range(1, BELOW + 1))",
+      "new": "(cell - k for k in range(1, BELOW + 1))"
+    },
+    {
+      "name": "cell dropped",
+      "old": "    return cell, empty, under",
+      "new": "    return 0, empty, under"
+    },
+    {
+      "name": "emptiness dropped",
+      "old": "    return cell, empty, under",
+      "new": "    return cell, False, under"
+    },
+    {
+      "name": "flag under its old context",
+      "old": "value = self.io.symbol(family, cell_context(cell, empty, self.frame, self.levelled, self.cols), n, value)",
+      "new": "value = self.io.symbol(family, context, n, value)"
+    },
+    {
+      "name": "flag value not passed",
+      "old": "self.levelled, self.cols), n, value)",
+      "new": "self.levelled, self.cols), n, 0)"
+    },
+    {
+      "name": "map not started afresh",
+      "old": "            self.frame, self.levelled = {}, set()\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "emptiness not remembered",
+      "old": "        self.frame[cell] = empty\n",
+      "new": "        self.frame[cell] = True\n"
+    },
+    {
+      "name": "levelled not remembered",
+      "old": "            self.levelled.add(cell)\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "every cell levelled",
+      "old": "        if value:\n            self.levelled.add(cell)",
+      "new": "        self.levelled.add(cell)"
+    },
+    {
+      "name": "other families dropped",
+      "old": "            return self.io.symbol(family, context, n, value)",
+      "new": "            return self.io.symbol(family, context, n, 0)"
+    },
+    {
+      "name": "uniform's value dropped",
+      "old": "return self.io.uniform(family, n, value)",
+      "new": "return self.io.uniform(family, n, 0)"
+    },
+    {
+      "name": "levels not in context",
+      "old": "return LevelContext(CellContext(io, cols), cols)",
+      "new": "return CellContext(io, cols)"
+    },
+    {
+      "name": "width from the height",
+      "old": "cols = facts.game.board_shape[1]",
+      "new": "cols = facts.game.board_shape[0] + 1"
+    },
+    {
+      "name": "parts dropped",
+      "old": "return data, bits, io.parts",
+      "new": "return data, bits, {}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-08T21:33:38+00:00",
+    "killed": 19,
+    "survived": [],
+    "killed_by": {
+      "one cell below": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "three cells below": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below"
+      ],
+      "below not empty-read": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "below not level-read": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "cells above": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ],
+      "cells to the left": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "cell dropped": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "emptiness dropped": [
+        "test_a_flag_reads_its_cell_whether_it_is_empty_and_the_two_cells_below",
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "flag under its old context": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes"
+      ],
+      "flag value not passed": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_every_other_call_is_level_context_s_own",
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_levels_keep_level_context_s_context",
+        "test_the_strategy_reads_back_from_the_bytes[source0]",
+        "test_the_strategy_reads_back_from_the_bytes[source1]"
+      ],
+      "map not started afresh": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "emptiness not remembered": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "levelled not remembered": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "every cell levelled": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh"
+      ],
+      "other families dropped": [
+        "test_each_flag_is_coded_under_its_context_and_each_map_starts_afresh",
+        "test_every_other_call_is_level_context_s_own",
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_levels_keep_level_context_s_context",
+        "test_the_strategy_reads_back_from_the_bytes[source0]",
+        "test_the_strategy_reads_back_from_the_bytes[source1]"
+      ],
+      "uniform's value dropped": [
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[source0]"
+      ],
+      "levels not in context": ["test_the_levels_keep_level_context_s_context"],
+      "width from the height": [
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes",
+        "test_the_board_s_width_comes_from_the_game"
+      ],
+      "parts dropped": [
+        "test_flags_sharing_a_context_learn_from_each_other_and_nothing_else_changes",
+        "test_the_levels_keep_level_context_s_context"
+      ]
+    }
+  }
+}

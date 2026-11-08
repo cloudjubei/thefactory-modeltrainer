@@ -688,7 +688,20 @@ rule standalone and in decision-list order, by ply.
     G3 dry run beforehand: 225,678 to 204,454. 02:19Z–03:12Z on 7 workers.
   - **P1 dropped (user's call, 2026-11-08):** picking pieces by their file cost. A scratch stand-in (the coder's final
     counts held fixed, maps at their lowest levels) put U2's search's gain inside the stand-in's own error, so it was not
-    built. **Next: T3 (user's choice): code each map's levels with a richer context**, developed on G3's T2 dry-run file.
+    built.
+  - **T3 result (h386, h387 supported — pre-registered; h388 after the data): the file takes 115,599 bits (14,450
+    bytes), 0.9780 of T2's 118,197.** User's choice after P1. `harness/level_context.py` (wraps strategy_file's coder;
+    a level's context is the highest level read so far in its map, its row and whether the cell below holds a level),
+    `harness/floor_t3.py`, `scripts/c4_level_context.py` (16 tests, 30/30 mutants). Context chosen on G3's T2 dry-run
+    file from 17 candidates (levels 76,981 to 72,644; file 204,454 to 200,115). It reads back to T2's game with 0
+    differences and all 3,372 leaves won in the run's replay. Only the levels change: 46,096 to 43,495 bits, 2.36 a
+    cell, 5.6% fewer as on G3. 18:50Z–19:35Z on 7 workers.
+  - **T4 (user's choice after T3): which cells a map levels, coded in context.** `harness/cell_context.py` (a second
+    wrapper, under T3's: a flag's context is the cell, whether it is empty at the first leaf reading the map, and for
+    each of the two cells below whether it is empty and levelled), `harness/floor_t4.py`, `scripts/c4_cell_context.py`
+    (16 tests, 33/33 mutants after 3 test gaps closed). Context chosen on G3's file from 29 candidates: flags 51,994 to
+    46,828; dry run on G3's T3 file 200,115 to 194,950 (0.974), 0 differences. Pre-registered 2026-11-08: h389
+    (read-back and replay), h390 (99/100 of 115,599 or less supports, 999/1000 refutes). Launched on T3's file.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);
