@@ -11398,6 +11398,94 @@
         "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a",
         "harness/floor_z2.py": "4af87f6f1b4d7b521dc9a2d472f522354505aa212438cddde90f96e009d5a781"
       }
+    },
+    "h383": {
+      "id": "h383",
+      "claim": "\u00a73.6 T2: T1's file with each map given the lowest levels that keep the order demands of every leaf on it, maps whose demands agree merged and exceptions the new map plays by itself dropped (harness.map_orders), written by harness.strategy_file, is rebuilt from its stored orders to exactly its bytes, reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to that game, and played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_file_reads_back_to_the_shrunk_game_and_every_line_wins",
+      "note": "Seen before registering: T2's dry run on G3's game, T1's G3 file of 225,678 bits shrunk to 204,454 (0.906), 0 differences read back, replay skipped; this proof's path run on those files (bytes rebuilt from the orders, 0 differences). No T2 file of Z2's game exists yet.",
+      "registered_at": "2026-11-08T02:18:43.008770+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_file_reads_back_to_the_shrunk_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1249.38s (0:20:49)",
+          "drawn_at": "2026-11-08T03:33:13.935177+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t2.json.gz",
+        "started": "2026-11-08T02:18:59+00:00"
+      },
+      "pins": {
+        "harness/map_orders.py": "8ccb1a09fd77b094aec33b82ff10354bf1959933074ebc2e29738c0f315e3ca2",
+        "harness/floor_t2.py": "bfd9186b57cee2dbc31ed73d7c129fb10cb834e66834c8aefb7b1b7c04195db9",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_map_orders.py": "85af46fa67a770b28c912ac38fff676d42bff6e1f5a5c63627f533012fde2364",
+        "tests/test_c49_t2_evidence.py": "8dacb8cadf569f0ed82f2aef8dd153b55c2364b1bb7b9e0f778d162a4f6e9aba",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_reading_is_undecidable"
+    },
+    "h384": {
+      "id": "h384",
+      "claim": "\u00a73.6 T2: that file takes 19/20 of T1's 130,005 bits or less (123,505 bits); 99/100 of them or more (128,705) refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_file_takes_19_20_of_130_005_bits_or_less",
+      "note": "Seen before registering: T2's dry run on G3's game, T1's G3 file of 225,678 bits shrunk to 204,454 (0.906), 0 differences read back, replay skipped; this proof's path run on those files (bytes rebuilt from the orders, 0 differences). No T2 file of Z2's game exists yet.",
+      "registered_at": "2026-11-08T02:18:50.843480+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_file_takes_19_20_of_130_005_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1245.80s (0:20:45)",
+          "drawn_at": "2026-11-08T03:54:08.884466+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t2.json.gz",
+        "started": "2026-11-08T02:18:59+00:00"
+      },
+      "pins": {
+        "harness/map_orders.py": "8ccb1a09fd77b094aec33b82ff10354bf1959933074ebc2e29738c0f315e3ca2",
+        "harness/floor_t2.py": "bfd9186b57cee2dbc31ed73d7c129fb10cb834e66834c8aefb7b1b7c04195db9",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_map_orders.py": "85af46fa67a770b28c912ac38fff676d42bff6e1f5a5c63627f533012fde2364",
+        "tests/test_c49_t2_evidence.py": "8dacb8cadf569f0ed82f2aef8dd153b55c2364b1bb7b9e0f778d162a4f6e9aba",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t2_evidence.py::test_c49_t2_the_size_is_undecidable"
+    },
+    "h385": {
+      "id": "h385",
+      "claim": "\u00a73.6 T2 (after the data): the file takes 118,197 bits (14,775 bytes), 0.9092 of T1's 130,005. Read from its bytes it holds the same 4,052 positions, 680 moves and 3,372 leaves (616 on the empty map, 43 reading a map mirrored, 129 with 1,625 exceptions, none dropped) and 1,008 maps of 18,444 cells, 468 read once. Maps take 77,045 bits against T1's 89,289, exceptions 21,054 against 21,051, the tree 20,099 against 19,663: of the 11,808 bits saved the levels give 11,519, at 2.50 bits a cell against 2.92, the lowest levels crowding the bottom (5,432 cells on level 0, 73 on level 7).",
+      "mode": "test",
+      "proof": "tests/test_c49_t2_after_evidence.py::test_c49_t2_the_file_takes_118_197_bits_and_the_levels_give_what_it_saves",
+      "note": "Written from a scratch count of the decoded file after h383 and h384 were judged.",
+      "registered_at": "2026-11-08T03:54:20.140958+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t2_after_evidence.py::test_c49_t2_the_file_takes_118_197_bits_and_the_levels_give_what_it_saves",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 388.84s (0:06:28)",
+          "drawn_at": "2026-11-08T04:00:53.972854+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t2.json.gz",
+        "started": "2026-11-08T02:18:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t2_after_evidence.py": "21944b2297a3fbfaf07198a8bd1be92246ffa26aa09efb3834878a444d378967",
+        "tests/test_c49_t2_evidence.py": "8dacb8cadf569f0ed82f2aef8dd153b55c2364b1bb7b9e0f778d162a4f6e9aba",
+        "harness/floor_t2.py": "bfd9186b57cee2dbc31ed73d7c129fb10cb834e66834c8aefb7b1b7c04195db9",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      }
     }
   }
 }

@@ -1,0 +1,68 @@
+"""Direct tests for harness/floor_t2.py — T2, T1's file with its maps shrunk to what its leaves play: the orders of
+every leaf on a map taken together, and the judgement of a file that must read back, win every line and be smaller."""
+from __future__ import annotations
+
+from harness.floor_t1 import SPEC as T1
+from harness.floor_t2 import SPEC, t2_orders, t2_report
+
+JUDGED = {**SPEC, "control_bits": 1_000}
+SOURCE = {"sha256": "t1", "bits": 1_000}
+
+
+def test_the_spec_reads_t1_s_file_under_its_rule():
+    assert SPEC["rule"] == T1["rule"] and SPEC["source"] == T1["file"] == "c49_t1.json.gz"
+    assert SPEC["control_bits"] == 130_005 and SPEC["file"] == "c49_t2.json.gz"
+    assert SPEC["support"] == (19, 20) and SPEC["refute"] == (99, 100)
+
+
+def test_the_orders_of_a_map_s_leaves_are_taken_together():
+    walks = [(1, [[3, 4]], [[4, 5]]), (2, [], [[1, 2]]), (1, [(3, 4), (6, 7)], [])]
+    assert t2_orders(walks) == {1: ({(3, 4), (6, 7)}, {(4, 5)}), 2: (set(), {(1, 2)})}
+
+
+def test_no_walks_no_orders():
+    assert t2_orders([]) == {}
+
+
+def _evidence(bits=900, won=True, leaves=7, sha="t1"):
+    return {"spec": "harness.floor_t2", "bits": bits, "source_sha256": sha,
+            "replay": {"won": won, "leaves": leaves, "reason": None}}
+
+
+def _report(e=None, read=None, source=SOURCE, spec=JUDGED):
+    e = e or _evidence()
+    return t2_report(e, read or {"bits": e["bits"], "differences": 0, "leaves": 7}, source, spec)
+
+
+def test_a_file_that_reads_back_and_wins_every_line_is_decoded():
+    assert _report() == {"decoded": "supported", "size": "supported"}
+
+
+def test_a_file_that_reads_back_differently_refutes():
+    assert _report(read={"bits": 900, "differences": 1, "leaves": 7})["decoded"] == "refuted"
+
+
+def test_a_file_of_another_length_refutes():
+    assert _report(read={"bits": 901, "differences": 0, "leaves": 7})["decoded"] == "refuted"
+
+
+def test_a_lost_replay_refutes_and_has_no_size():
+    assert _report(_evidence(won=False, bits=10)) == {"decoded": "refuted", "size": "not_run"}
+
+
+def test_a_replay_of_other_leaves_refutes():
+    assert _report(_evidence(leaves=6))["decoded"] == "refuted"
+
+
+def test_the_size_bars_are_inclusive():
+    assert _report(_evidence(bits=950))["size"] == "supported"
+    assert _report(_evidence(bits=951))["size"] == "inconclusive"
+    assert _report(_evidence(bits=989))["size"] == "inconclusive"
+    assert _report(_evidence(bits=990))["size"] == "refuted"
+
+
+def test_a_run_off_its_spec_or_its_source_is_not_run():
+    neither = {"decoded": "not_run", "size": "not_run"}
+    assert _report({**_evidence(), "spec": "harness.floor_t1"}) == neither
+    assert _report(_evidence(sha="other")) == neither
+    assert _report(source={**SOURCE, "bits": 999}) == neither

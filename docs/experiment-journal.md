@@ -6218,15 +6218,17 @@ of X3's to G4's. Parts: opening 849, library 70,435 (801 maps, 223 beyond G3's l
 those beyond X2's), 416 strategies 49,692, 50 builds 41,776. Write-up headline now 162,752; against the references 4.1x
 smaller than the policy net, 1.8x larger than WeakC4 as shipped, 3.6–4.7x larger than WeakC4 entropy-coded.
 
-Library recoding looked at 2026-11-06, the user's choice after Z2. M1 had already refuted simple exact codes (h283, h284),
-so only models shared across maps were open. Developed on the 1,960 listed maps the game does not play: on samples of 801,
-adaptive codes over all 42 cells take 1.03 or more of today's code, and chosen-cell flags plus per-cell adaptive levels
-take 0.965 if the decoder knows which cells are empty. That condition does not hold: `map_bits` pays a bit per cell empty
-where a map was FOUND, and the assembled game never states that position. In scratch, 438 of the 801 maps have a levelled
-cell already full at the first leaf that plays them, and for 337 no leaf has every levelled cell empty (271 of 613 among
-rows that never read a mirror). 576 levelled cells are full at every leaf playing the map, so a leaf never reads them. A
-rough strict code takes 73,025 against the 70,435 counted. The count also pays nothing for telling a piece from a trivial
-position or for which list a piece's references point into. The play is not in question; the size is a count, not a file.
+Library recoding looked at 2026-11-06, the user's choice after Z2. M1 had already refuted simple exact codes (h283,
+h284), so only models shared across maps were open. Developed on the 1,960 listed maps the game does not play: on
+samples of 801, adaptive codes over all 42 cells take 1.03 or more of today's code, and chosen-cell flags plus per-cell
+adaptive levels take 0.965 if the decoder knows which cells are empty. That condition does not hold: `map_bits` pays a
+bit per cell empty where a map was FOUND, and the assembled game never states that position. In scratch, 438 of the 801
+maps have a levelled cell already full at the first leaf that plays them, and for 337 no leaf has every levelled cell
+empty (271 of 613 among rows that never read a mirror; these scratch figures were never proven, and the script that made
+them misread X4's rows). 576 levelled cells are full at every leaf playing the map, so a leaf never reads them. A rough
+strict code takes 73,025 against the 70,435 counted. The count also pays nothing for telling a piece from a trivial
+position or for which list a piece's references point into. The play is not in question; the size is a count, not a
+file.
 
 T1 registered 2026-11-06 (pre-registered h379, h380; the user chose a strict code and a full decode). One walk from the
 empty board writes the game through an arithmetic coder; a decoder has the bytes, the game's rules, the map rule's
@@ -6245,3 +6247,38 @@ levels 57,615) against the count's 99,613, exceptions 21,051 against 21,815, tre
 and the decoder program. h381 was registered with one pin (--pins takes a comma-separated list, and the repeated flag
 kept the last) and never run; h382 is the same claim with all five pins, and it supersedes h381. The pieces were chosen
 against the count, so no search has seen what a piece costs in the file.
+
+T2 begun 2026-11-07, the user's choice after T1: shrink the maps. Under T1's rule a map matters only by the order it puts
+the safe moves' cells in where the rule has a choice: the move played must sit on a lower level than every lower-numbered
+safe move and on no higher a level than every higher-numbered one, with unlevelled cells as one more level after the
+last. `harness/map_orders.py` walks every line each leaf plays and collects those pairs, gives each map the lowest levels
+that keep them, merges maps whose pairs agree when that costs fewer cells than their own, and drops exceptions the new map
+plays by itself. Every move stays the move T1's file makes. Developed on G3's game: 1,847 maps with pairs, none
+unsatisfiable. The search's levels are spread evenly over all 8; the lowest levels are not, so the gain is in level
+values, not cells (33,522 to 31,529). A context of the map's highest level so far plus the row would save about 4% more
+of the levels and was not taken; absorbing exceptions into the maps saved 2 of 252 leaves and was not taken. 43 tests,
+50/50 mutants after one equivalent was removed and three test gaps closed. The first dev script had no `__main__` guard,
+and its spawned workers re-ran it and hung the parent; the production script has the guard. Dry run of
+`scripts/c4_map_orders.py` on G3's game: 225,678 bits to 204,454 (0.906), 1,738 maps of 31,067 cells, read back with 0
+differences, 66 minutes (replay skipped).
+
+T2 registered 2026-11-08 (pre-registered h383, the read-back and replay, and h384, 19/20 of 130,005 or less supports and
+99/100 refutes). The proof rebuilds the maps from the orders stored in the run's evidence, encodes T1's game with them to
+the file's bytes and decodes the bytes back; its path was run first on G3's dry-run files, which gave the same bytes and
+0 differences.
+
+T2 result 2026-11-08 (h383, h384 supported — pre-registered; h385 after the data). The file takes 118,197 bits, 14,775
+bytes, 0.9092 of T1's 130,005, past the 19/20 bar (123,505). It read back from its bytes alone with 0 differences, and
+the run's replay won every line of all 3,372 leaves. 02:19Z–03:12Z on 7 workers, 23 minutes of it the walk. Maps 77,045
+against T1's 89,289: the levels 46,096 against 57,615, 2.50 bits a cell against 2.92, and the cells 30,949 against
+31,674. The lowest levels crowd the bottom: 5,432 cells on level 0, each level holding fewer than the one below, 73 on
+level 7. 1,008 maps of 18,444 cells, 468 read once. No exception became redundant (1,625 on 129 leaves, 21,054 bits
+against 21,051), and the tree takes 20,099 against 19,663 (references 15,775 against 15,339). Of the
+11,808 bits saved, the levels give 11,519. Every move is T1's by construction; the pieces were still chosen against the
+count, not the file.
+
+P1 looked at 2026-11-08, the user's choice after T2: pick the pieces by what they cost in the file. In scratch, each of
+the 1,841 pieces the search could take was priced with the coder's final counts on T2's file held fixed, its maps at the
+lowest levels their leaves need, a map shared by pieces paid once. That stand-in came within about 3% of the real file on
+Z2's game, and U2's search driven by it moved 18 of 819 positions for about 1.4% (a scratch estimate, never proven).
+Inside the stand-in's own error, so the user dropped it for T3, a richer context for the levels.

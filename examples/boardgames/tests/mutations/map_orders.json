@@ -1,0 +1,296 @@
+{
+  "file": "harness/map_orders.py",
+  "tests": ["tests/test_map_orders.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "any rule read",
+      "old": "    if any(getattr(facts, k) != v for k, v in RULE.items()):\n        raise ValueError(f\"the orders are read only under the rule {RULE}\")\n",
+      "new": ""
+    },
+    {
+      "name": "mirrored exceptions allowed",
+      "old": "    if mirrored and exceptions:\n        raise ValueError(\"a mirrored reading has no exceptions\")\n",
+      "new": ""
+    },
+    {
+      "name": "mirror not required",
+      "old": "    if mirrored and cells is None:\n        raise ValueError(\"a mirrored reading needs the board's mirror\")\n",
+      "new": ""
+    },
+    {
+      "name": "mirrored read plain",
+      "old": "read = image(s) if mirrored else s",
+      "new": "read = s"
+    },
+    {
+      "name": "exception not followed",
+      "old": "            stack.append(game.step(s, exceptions[key]))\n            continue\n",
+      "new": "            continue\n"
+    },
+    {
+      "name": "exception state not kept",
+      "old": "            reached[key] = s\n",
+      "new": ""
+    },
+    {
+      "name": "exception demands too",
+      "old": "        if key in exceptions:\n            reached[key] = s\n            stack.append(game.step(s, exceptions[key]))\n            continue\n",
+      "new": "        if key in exceptions:\n            reached[key] = s\n"
+    },
+    {
+      "name": "no move accepted",
+      "old": "        if move is None:\n            raise ValueError(f\"the rule has no move at {key}\")\n",
+      "new": ""
+    },
+    {
+      "name": "wins demand",
+      "old": "        if not wins:\n",
+      "new": "        if True:\n"
+    },
+    {
+      "name": "strict and weak swapped",
+      "old": "(strict if other < move else weak)",
+      "new": "(weak if other < move else strict)"
+    },
+    {
+      "name": "every pair strict",
+      "old": "(strict if other < move else weak)",
+      "new": "strict"
+    },
+    {
+      "name": "pair reversed",
+      "old": "add((cell[move], cell[other]))",
+      "new": "add((cell[other], cell[move]))"
+    },
+    {
+      "name": "mirrored move not mapped back",
+      "old": "            move = next(a for a in game.legal_actions(s) if facts.placed_cell(s, a) == target)\n",
+      "new": ""
+    },
+    {
+      "name": "mirror target unmirrored",
+      "old": "target = cells[facts.placed_cell(read, move)]",
+      "new": "target = facts.placed_cell(read, move)"
+    },
+    {
+      "name": "other side not walked",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))\n            continue\n",
+      "new": "            continue\n"
+    },
+    {
+      "name": "no closure",
+      "old": "            if o in need and m not in need:\n                need.add(m)\n                grew = True\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "weak pairs not closed",
+      "old": "    pairs = strict | weak\n",
+      "new": "    pairs = strict\n"
+    },
+    {
+      "name": "strict step zero",
+      "old": "edges = [(m, o, 1) for m, o in strict if o in need]",
+      "new": "edges = [(m, o, 0) for m, o in strict if o in need]"
+    },
+    {
+      "name": "weak step one",
+      "old": "[(m, o, 0) for m, o in weak if o in need]",
+      "new": "[(m, o, 1) for m, o in weak if o in need]"
+    },
+    {
+      "name": "levels unbounded",
+      "old": "                if level[o] >= n_levels:\n                    return None\n",
+      "new": ""
+    },
+    {
+      "name": "one level short",
+      "old": "if level[o] >= n_levels:",
+      "new": "if level[o] >= n_levels - 1:"
+    },
+    {
+      "name": "unsatisfiable kept",
+      "old": "        if levels is None:\n            raise ValueError(f\"map {i}: no map of {n_levels} levels keeps its orders\")\n",
+      "new": ""
+    },
+    {
+      "name": "empty map may level",
+      "old": "    if own.get(0):\n        raise ValueError(\"the empty map's leaves demand levels it does not have\")\n",
+      "new": ""
+    },
+    {
+      "name": "empty map merged",
+      "old": "for i in sorted((i for i in own if i != 0), key=lambda i: (-len(own[i]), i)):",
+      "new": "for i in sorted(own, key=lambda i: (-len(own[i]), i)):"
+    },
+    {
+      "name": "smallest first",
+      "old": "key=lambda i: (-len(own[i]), i)",
+      "new": "key=lambda i: (len(own[i]), i)"
+    },
+    {
+      "name": "last best kept",
+      "old": "len(levels) - len(g[\"levels\"]) < best[1]",
+      "new": "len(levels) - len(g[\"levels\"]) <= best[1]"
+    },
+    {
+      "name": "join at own cost",
+      "old": "best[1] < max(len(own[i]), 1)",
+      "new": "best[1] <= len(own[i])"
+    },
+    {
+      "name": "empty joins anywhere",
+      "old": "best[1] < max(len(own[i]), 1)",
+      "new": "best[1] < len(own[i]) or not own[i]"
+    },
+    {
+      "name": "merged orders not kept",
+      "old": "            g[\"strict\"], g[\"weak\"], g[\"levels\"] = g[\"strict\"] | strict, g[\"weak\"] | weak, best[2]\n",
+      "new": "            g[\"levels\"] = best[2]\n"
+    },
+    {
+      "name": "no plan entry for 0",
+      "old": "    if 0 in own:\n        plan[0] = {}\n",
+      "new": ""
+    },
+    {
+      "name": "mirrored empty is map 0",
+      "old": "content = (mirrored and not levels, tuple(sorted(levels.items())))",
+      "new": "content = (False, tuple(sorted(levels.items())))"
+    },
+    {
+      "name": "every exception kept",
+      "old": "if choose(facts, reached[k] if k in reached else state_of(k), levels, n_levels) != move}",
+      "new": "}"
+    },
+    {
+      "name": "exceptions read on the old map",
+      "old": "if choose(facts, reached[k] if k in reached else state_of(k), levels, n_levels) != move}",
+      "new": "if choose(facts, reached[k] if k in reached else state_of(k), strategy[\"maps\"][node[\"leaf\"]], n_levels) != move}"
+    },
+    {
+      "name": "missing plan reads empty",
+      "old": "levels = plan[node[\"leaf\"]]",
+      "new": "levels = plan.get(node[\"leaf\"], {})"
+    },
+    {
+      "name": "mirrored flag lost",
+      "old": "out = {\"leaf\": ids[content], **({\"mirrored\": True} if mirrored else {})}",
+      "new": "out = {\"leaf\": ids[content]}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-08T00:42:20+00:00",
+    "killed": 35,
+    "survived": [],
+    "killed_by": {
+      "any rule read": [
+        "test_only_the_lowest_tie_rule_with_unlevelled_cells_last_is_read[rule0]",
+        "test_only_the_lowest_tie_rule_with_unlevelled_cells_last_is_read[rule1]",
+        "test_only_the_lowest_tie_rule_with_unlevelled_cells_last_is_read[rule2]"
+      ],
+      "mirrored exceptions allowed": ["test_a_mirrored_reading_with_exceptions_is_refused"],
+      "mirror not required": ["test_a_mirrored_reading_needs_the_mirror"],
+      "mirrored read plain": ["test_a_mirrored_reading_demands_what_the_mirrored_board_does"],
+      "exception not followed": ["test_the_walk_follows_the_exception_not_the_map"],
+      "exception state not kept": [
+        "test_an_exception_s_position_demands_nothing_and_its_state_is_kept"
+      ],
+      "exception demands too": [
+        "test_an_exception_s_position_demands_nothing_and_its_state_is_kept",
+        "test_the_walk_follows_the_exception_not_the_map"
+      ],
+      "no move accepted": ["test_a_position_the_rule_has_no_move_for_is_refused"],
+      "wins demand": [
+        "test_a_shrunk_strategy_still_wins_every_line[levels0-read0]",
+        "test_a_shrunk_strategy_still_wins_every_line[levels1-read1]",
+        "test_an_exception_s_position_demands_nothing_and_its_state_is_kept",
+        "test_forced_positions_demand_nothing",
+        "test_the_centre_is_demanded_level_with_the_moves_above_it"
+      ],
+      "strict and weak swapped": [
+        "test_a_choice_demands_the_move_s_cell_below_lower_moves_and_not_above_higher_ones",
+        "test_a_shrunk_strategy_still_wins_every_line[levels0-read0]",
+        "test_a_shrunk_strategy_still_wins_every_line[levels1-read1]",
+        "test_the_centre_is_demanded_level_with_the_moves_above_it",
+        "test_the_walk_follows_the_exception_not_the_map"
+      ],
+      "every pair strict": [
+        "test_a_choice_demands_the_move_s_cell_below_lower_moves_and_not_above_higher_ones",
+        "test_a_shrunk_strategy_still_wins_every_line[levels0-read0]",
+        "test_a_shrunk_strategy_still_wins_every_line[levels1-read1]",
+        "test_the_centre_is_demanded_level_with_the_moves_above_it",
+        "test_the_walk_follows_the_exception_not_the_map"
+      ],
+      "pair reversed": [
+        "test_a_choice_demands_the_move_s_cell_below_lower_moves_and_not_above_higher_ones",
+        "test_a_shrunk_map_that_still_needs_levels_wins_every_line",
+        "test_the_centre_is_demanded_level_with_the_moves_above_it",
+        "test_the_walk_follows_the_exception_not_the_map"
+      ],
+      "mirrored move not mapped back": [
+        "test_a_mirrored_reading_demands_what_the_mirrored_board_does"
+      ],
+      "mirror target unmirrored": ["test_a_mirrored_reading_demands_what_the_mirrored_board_does"],
+      "other side not walked": ["test_the_walk_follows_the_exception_not_the_map"],
+      "no closure": [
+        "test_a_map_with_no_cells_joins_only_where_it_adds_none",
+        "test_lowest_keeps_every_demand",
+        "test_lowest_levels_a_weak_demand_level_with_its_partner",
+        "test_lowest_refuses_a_strict_cycle_and_a_chain_longer_than_the_levels"
+      ],
+      "weak pairs not closed": [
+        "test_a_map_with_no_cells_joins_only_where_it_adds_none",
+        "test_lowest_keeps_every_demand",
+        "test_lowest_levels_a_weak_demand_level_with_its_partner",
+        "test_lowest_refuses_a_strict_cycle_and_a_chain_longer_than_the_levels"
+      ],
+      "strict step zero": [
+        "test_a_group_keeps_the_orders_of_every_map_it_took",
+        "test_lowest_keeps_every_demand",
+        "test_lowest_levels_a_strict_chain_upward_from_zero",
+        "test_lowest_refuses_a_strict_cycle_and_a_chain_longer_than_the_levels",
+        "test_unsatisfiable_demands_are_refused"
+      ],
+      "weak step one": ["test_lowest_levels_a_weak_demand_level_with_its_partner"],
+      "levels unbounded": ["timeout after 60s"],
+      "one level short": ["test_lowest_refuses_a_strict_cycle_and_a_chain_longer_than_the_levels"],
+      "unsatisfiable kept": ["test_unsatisfiable_demands_are_refused"],
+      "empty map may level": ["test_the_empty_map_is_never_merged_and_must_stay_empty"],
+      "empty map merged": [
+        "test_maps_whose_orders_agree_merge",
+        "test_the_empty_map_is_never_merged_and_must_stay_empty"
+      ],
+      "smallest first": [
+        "test_a_group_keeps_the_orders_of_every_map_it_took",
+        "test_a_map_with_no_cells_joins_only_where_it_adds_none"
+      ],
+      "last best kept": ["test_a_map_with_no_cells_joins_only_where_it_adds_none"],
+      "join at own cost": [
+        "test_a_map_joins_where_it_grows_the_fewest_cells",
+        "test_a_map_stays_apart_when_joining_would_cost_its_own_cells_or_more"
+      ],
+      "empty joins anywhere": [
+        "test_a_map_with_no_cells_joins_only_where_it_adds_none",
+        "test_a_shrunk_strategy_still_wins_every_line[levels0-read0]",
+        "test_a_shrunk_strategy_still_wins_every_line[levels1-read1]"
+      ],
+      "merged orders not kept": ["test_a_group_keeps_the_orders_of_every_map_it_took"],
+      "no plan entry for 0": [
+        "test_maps_whose_orders_agree_merge",
+        "test_the_empty_map_is_never_merged_and_must_stay_empty"
+      ],
+      "mirrored empty is map 0": ["test_shrink_gives_a_mirrored_empty_map_its_own_place"],
+      "every exception kept": [
+        "test_shrink_drops_an_exception_the_new_map_plays_and_keeps_the_rest",
+        "test_shrink_reads_an_exception_s_state_from_its_key_when_none_was_kept"
+      ],
+      "exceptions read on the old map": [
+        "test_shrink_drops_an_exception_the_new_map_plays_and_keeps_the_rest",
+        "test_shrink_reads_an_exception_s_state_from_its_key_when_none_was_kept"
+      ],
+      "missing plan reads empty": ["test_a_map_without_a_plan_is_refused"],
+      "mirrored flag lost": ["test_shrink_gives_a_mirrored_empty_map_its_own_place"]
+    }
+  }
+}

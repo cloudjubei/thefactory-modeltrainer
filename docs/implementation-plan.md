@@ -679,6 +679,16 @@ rule standalone and in decision-list order, by ply.
     won in the run's replay. Maps 89,289 (count 99,613), exceptions 21,051 (21,815), tree 19,663 (41,324). Every
     whole-game size before it was a count, and the headline is now the file. The decoder's rules, mirror and program are
     not in the 130,005. The pieces were chosen against the count, not the file.
+  - **T2 result (h383, h384 supported — pre-registered; h385 after the data): the file takes 118,197 bits (14,775
+    bytes), 0.9092 of T1's 130,005.** User's choice after T1: shrink the maps. `harness/map_orders.py`,
+    `harness/floor_t2.py`, `scripts/c4_map_orders.py` (43 tests, 50/50 mutants). Each map gets the lowest levels that keep
+    the order demands of every leaf on it; maps whose demands agree are merged; every move stays T1's. It reads back with
+    0 differences and all 3,372 leaves won in the run's replay. Maps 77,045 (89,289), almost all in the levels, 46,096
+    against 57,615 (2.50 bits a cell against 2.92); no exception became redundant; the tree takes 436 bits more.
+    G3 dry run beforehand: 225,678 to 204,454. 02:19Z–03:12Z on 7 workers.
+  - **P1 dropped (user's call, 2026-11-08):** picking pieces by their file cost. A scratch stand-in (the coder's final
+    counts held fixed, maps at their lowest levels) put U2's search's gain inside the stand-in's own error, so it was not
+    built. **Next: T3 (user's choice): code each map's levels with a richer context**, developed on G3's T2 dry-run file.
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);

@@ -1,0 +1,107 @@
+{
+  "file": "harness/floor_t2.py",
+  "tests": ["tests/test_floor_t2.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "strict pairs dropped",
+      "old": "both[0].update(map(tuple, strict))",
+      "new": "pass"
+    },
+    {
+      "name": "weak pairs dropped",
+      "old": "both[1].update(map(tuple, weak))",
+      "new": "pass"
+    },
+    {
+      "name": "orders replaced",
+      "old": "both = orders.setdefault(i, (set(), set()))",
+      "new": "both = orders[i] = (set(), set())"
+    },
+    {
+      "name": "spec not checked",
+      "old": "if (e.get(\"spec\") != \"harness.floor_t2\" or ",
+      "new": "if ("
+    },
+    {
+      "name": "source not checked",
+      "old": "e.get(\"source_sha256\") != source.get(\"sha256\")\n            or ",
+      "new": ""
+    },
+    {
+      "name": "control not checked",
+      "old": "\n            or source.get(\"bits\") != spec[\"control_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "bits not compared",
+      "old": "read[\"bits\"] != e[\"bits\"] or ",
+      "new": ""
+    },
+    {
+      "name": "differences ignored",
+      "old": "read[\"differences\"] or ",
+      "new": ""
+    },
+    {
+      "name": "lost replay ignored",
+      "old": "not replay[\"won\"] or ",
+      "new": ""
+    },
+    {
+      "name": "leaves not compared",
+      "old": " or replay[\"leaves\"] != read[\"leaves\"]",
+      "new": ""
+    },
+    {
+      "name": "support exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "refute bar is support",
+      "old": "rden * bits >= rnum * control",
+      "new": "den * bits > num * control"
+    },
+    {
+      "name": "support from 130,005",
+      "old": "SPEC = {\"rule\": T1[\"rule\"], \"control_bits\": 130_005,",
+      "new": "SPEC = {\"rule\": T1[\"rule\"], \"control_bits\": 130_004,"
+    },
+    {
+      "name": "other bars",
+      "old": "\"support\": (19, 20), \"refute\": (99, 100)",
+      "new": "\"support\": (9, 10), \"refute\": (99, 100)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-08T00:39:56+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "strict pairs dropped": ["test_the_orders_of_a_map_s_leaves_are_taken_together"],
+      "weak pairs dropped": ["test_the_orders_of_a_map_s_leaves_are_taken_together"],
+      "orders replaced": ["test_the_orders_of_a_map_s_leaves_are_taken_together"],
+      "spec not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "source not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "control not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "bits not compared": ["test_a_file_of_another_length_refutes"],
+      "differences ignored": ["test_a_file_that_reads_back_differently_refutes"],
+      "lost replay ignored": ["test_a_lost_replay_refutes_and_has_no_size"],
+      "leaves not compared": ["test_a_replay_of_other_leaves_refutes"],
+      "support exclusive": ["test_the_size_bars_are_inclusive"],
+      "refute exclusive": ["test_the_size_bars_are_inclusive"],
+      "refute bar is support": ["test_the_size_bars_are_inclusive"],
+      "support from 130,005": ["test_the_spec_reads_t1_s_file_under_its_rule"],
+      "other bars": [
+        "test_the_size_bars_are_inclusive",
+        "test_the_spec_reads_t1_s_file_under_its_rule"
+      ]
+    }
+  }
+}
