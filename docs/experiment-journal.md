@@ -6311,3 +6311,13 @@ is empty 46,828, the best; three or five cells below were worse (47,017, 47,425)
 wrapper, under T3's, so T4's file carries both contexts; level_context, pinned by T3's claims, is untouched. 16 tests;
 33/33 mutants after three gaps closed (a board with three cells below a cell, a second map reading the first map's
 flags, levels that kept T3's context only by chance of equal costs).
+
+T4 registered 2026-11-08 (pre-registered h389, the read-back and replay, and h390, 99/100 of 115,599 or less supports
+and 999/1000 refutes), after the proof's path was run on G3's dry-run files: 200,115 bits to 194,950 (0.974), 0
+differences.
+
+T4 result 2026-11-09 (h389, h390 supported — pre-registered; h391 after the data). The file takes 112,644 bits, 14,081
+bytes, 0.9744 of T3's 115,599, past the 99/100 bar (114,443). It reads back from its bytes alone to T3's game with 0
+differences, and the run's replay won every line of all 3,372 leaves. 22:41Z–23:38Z. Every part but the cell flags is
+T3's to a tenth of a bit; the flags take 27,995.3 bits against 30,949.4, 9.5% fewer, near the 9.9% the same context
+saved on G3's file in the dry run.

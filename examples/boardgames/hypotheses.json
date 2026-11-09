@@ -11580,10 +11580,17 @@
       "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_reads_back_to_t3_s_game_and_every_line_wins",
       "note": "Seen before registering: 29 flag contexts simulated on G3's T2 dry-run file (the chosen one 51,994 to 46,828 bits of flags); T4's dry run on G3's T3 file, 200,115 bits to 194,950 (0.974), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T3 file was not re-encoded with any flag context.",
       "registered_at": "2026-11-08T22:40:44.255715+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_reads_back_to_t3_s_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3670.27s (1:01:10)",
+          "drawn_at": "2026-11-09T00:39:51.700351+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_t4.json.gz",
-        "started": null
+        "started": "2026-11-08T22:40:59+00:00"
       },
       "pins": {
         "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
@@ -11604,10 +11611,17 @@
       "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_takes_99_100_of_115_599_bits_or_less",
       "note": "Seen before registering: 29 flag contexts simulated on G3's T2 dry-run file (the chosen one 51,994 to 46,828 bits of flags); T4's dry run on G3's T3 file, 200,115 bits to 194,950 (0.974), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T3 file was not re-encoded with any flag context.",
       "registered_at": "2026-11-08T22:40:53.331912+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_file_takes_99_100_of_115_599_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3313.86s (0:55:13)",
+          "drawn_at": "2026-11-09T01:35:15.717164+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_t4.json.gz",
-        "started": null
+        "started": "2026-11-08T22:40:59+00:00"
       },
       "pins": {
         "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
@@ -11620,6 +11634,32 @@
         "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
       },
       "inconclusive_proof": "tests/test_c49_t4_evidence.py::test_c49_t4_the_size_is_undecidable"
+    },
+    "h391": {
+      "id": "h391",
+      "claim": "\u00a73.6 T4 (after the data): the file takes 112,644 bits (14,081 bytes), 0.9744 of T3's 115,599; every part but the cell flags is T3's, and the flags take 27,995.3 bits against 30,949.4, 9.5% fewer, near the 9.9% the same context saved on G3's file in the dry run.",
+      "mode": "test",
+      "proof": "tests/test_c49_t4_after_evidence.py::test_c49_t4_the_file_takes_112_644_bits_and_only_the_flags_changed",
+      "note": "Registered after the data: a description of T4's file, not a prediction.",
+      "registered_at": "2026-11-09T01:35:30.922016+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t4_after_evidence.py::test_c49_t4_the_file_takes_112_644_bits_and_only_the_flags_changed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.16s",
+          "drawn_at": "2026-11-09T01:35:35.494294+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t4.json.gz",
+        "started": "2026-11-08T22:40:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t4_after_evidence.py": "97bbe369b0f2aa8ba2635de921e6c0f6562b3a73d244be4faf4238a769588f15",
+        "tests/test_c49_t4_evidence.py": "59fb6baa49dac23c6abd05745774cff879d33235121f2a42d393f3c65940ccc5",
+        "harness/floor_t4.py": "e365d5adfc6fb402316b8c6d680e50fcd653becd20f54f76cb3647c9763ff1e6",
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b"
+      }
     }
   }
 }
