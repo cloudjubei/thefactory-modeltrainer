@@ -1,0 +1,362 @@
+{
+  "file": "harness/best_first.py",
+  "tests": ["tests/test_best_first.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "descends by the largest proof number",
+      "old": "key=(lambda c: c.pn) if node.kind == \"or\" else (lambda c: c.dn))",
+      "new": "key=(lambda c: -c.pn) if node.kind == \"or\" else (lambda c: c.dn))"
+    },
+    {
+      "name": "descends by disproof at OR",
+      "old": "key=(lambda c: c.pn) if node.kind == \"or\" else (lambda c: c.dn))",
+      "new": "key=(lambda c: c.dn) if node.kind == \"or\" else (lambda c: c.dn))"
+    },
+    {
+      "name": "descends by proof at AND",
+      "old": "key=(lambda c: c.pn) if node.kind == \"or\" else (lambda c: c.dn))",
+      "new": "key=(lambda c: c.pn) if node.kind == \"or\" else (lambda c: c.pn))"
+    },
+    {
+      "name": "stops only when proved",
+      "old": "while top.pn != 0 and top.dn != 0 and not self._spent():",
+      "new": "while top.pn != 0 and not self._spent():"
+    },
+    {
+      "name": "disproof read as unknown",
+      "old": "return True if top.pn == 0 else False if top.dn == 0 else None",
+      "new": "return True if top.pn == 0 else None"
+    },
+    {
+      "name": "budget ignored",
+      "old": "(self.max_evaluations is not None and self.evaluations >= self.max_evaluations)",
+      "new": "False"
+    },
+    {
+      "name": "deadline ignored",
+      "old": "(self.deadline is not None and time.monotonic() > self.deadline)",
+      "new": "False"
+    },
+    {
+      "name": "positions not shared",
+      "old": "        node = self.nodes.get(key)\n        if node is None:",
+      "new": "        node = None\n        if node is None:"
+    },
+    {
+      "name": "evaluations not counted",
+      "old": "        self.evaluations += 1\n",
+      "new": ""
+    },
+    {
+      "name": "earlier proofs ignored",
+      "old": "        if key in prover.proved:\n            node.pn, node.dn = 0, INF\n        elif not",
+      "new": "        if False:\n            node.pn, node.dn = 0, INF\n        elif not"
+    },
+    {
+      "name": "no safe move not lost",
+      "old": "        elif not self.facts.safe_moves(state):\n            node.pn, node.dn = INF, 0\n",
+      "new": ""
+    },
+    {
+      "name": "maps never tried",
+      "old": "        elif prover._small(state) and prover._leaf(state, key) is True:",
+      "new": "        elif False:"
+    },
+    {
+      "name": "empty map never tried on large positions",
+      "old": "        elif not prover._small(state) and prover._wins(state, {}):",
+      "new": "        elif False:"
+    },
+    {
+      "name": "empty-map proof not stored",
+      "old": "            prover.proved[key] = {\"leaf\": 0}\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "expansions not counted",
+      "old": "        self.expansions += 1\n",
+      "new": ""
+    },
+    {
+      "name": "losing move not lost",
+      "old": "            if replies is None:\n                move.pn, move.dn = INF, 0\n                continue",
+      "new": "            if replies is None:\n                continue"
+    },
+    {
+      "name": "replies not linked",
+      "old": "                child.parents.append(move)\n",
+      "new": ""
+    },
+    {
+      "name": "move not settled",
+      "old": "            self._settle(move)\n        self._settle(node)",
+      "new": "        self._settle(node)"
+    },
+    {
+      "name": "won-at-once move not proved",
+      "old": "            if node.kind == \"and\" and node.dn != 0:\n                node.pn, node.dn = 0, INF",
+      "new": "            if False:\n                node.pn, node.dn = 0, INF"
+    },
+    {
+      "name": "OR proof by sum",
+      "old": "            node.pn, node.dn = min(c.pn for c in node.children), sum(c.dn for c in node.children)",
+      "new": "            node.pn, node.dn = sum(c.pn for c in node.children), sum(c.dn for c in node.children)"
+    },
+    {
+      "name": "OR disproof by min",
+      "old": "            node.pn, node.dn = min(c.pn for c in node.children), sum(c.dn for c in node.children)",
+      "new": "            node.pn, node.dn = min(c.pn for c in node.children), min(c.dn for c in node.children)"
+    },
+    {
+      "name": "AND proof by min",
+      "old": "            node.pn, node.dn = sum(c.pn for c in node.children), min(c.dn for c in node.children)",
+      "new": "            node.pn, node.dn = min(c.pn for c in node.children), min(c.dn for c in node.children)"
+    },
+    {
+      "name": "AND disproof by sum",
+      "old": "            node.pn, node.dn = sum(c.pn for c in node.children), min(c.dn for c in node.children)",
+      "new": "            node.pn, node.dn = sum(c.pn for c in node.children), sum(c.dn for c in node.children)"
+    },
+    {
+      "name": "move proof not stored",
+      "old": "            self.prover.proved[node.key] = {\"move\": winner.move}",
+      "new": "            pass"
+    },
+    {
+      "name": "proved by a losing move",
+      "old": "            winner = next(c for c in node.children if c.pn == 0)",
+      "new": "            winner = node.children[0]"
+    },
+    {
+      "name": "update stops at once",
+      "old": "            if (n.pn, n.dn) != before:\n                stack.extend(n.parents)",
+      "new": "            if False:\n                stack.extend(n.parents)"
+    },
+    {
+      "name": "only the first parent updated",
+      "old": "        stack = list(node.parents)",
+      "new": "        stack = list(node.parents[:1])"
+    },
+    {
+      "name": "expanded node itself not settled",
+      "old": "            self._settle(move)\n        self._settle(node)\n",
+      "new": "            self._settle(move)\n"
+    },
+    {
+      "name": "maps tried with maps off",
+      "old": "        elif not self.maps:\n            return\n",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-10T23:20:10+00:00",
+    "killed": 29,
+    "survived": [],
+    "killed_by": {
+      "descends by the largest proof number": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "descends by disproof at OR": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "descends by proof at AND": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "stops only when proved": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_position_with_no_safe_move_is_disproved_at_once",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "disproof read as unknown": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_with_no_safe_move_is_disproved_at_once",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "budget ignored": ["test_a_spent_budget_says_neither"],
+      "deadline ignored": ["test_a_spent_budget_says_neither"],
+      "positions not shared": ["test_a_position_reached_twice_is_one_node"],
+      "evaluations not counted": [
+        "test_a_position_already_proved_is_taken_as_proved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither"
+      ],
+      "earlier proofs ignored": ["test_a_position_already_proved_is_taken_as_proved"],
+      "no safe move not lost": ["test_a_position_with_no_safe_move_is_disproved_at_once"],
+      "maps never tried": [
+        "test_a_position_a_map_proves_takes_no_expansion",
+        "test_a_spent_budget_says_neither",
+        "test_maps_cut_the_positions_a_proof_needs"
+      ],
+      "empty map never tried on large positions": [
+        "test_a_large_position_is_still_proved_by_the_empty_map"
+      ],
+      "empty-map proof not stored": ["test_a_large_position_is_still_proved_by_the_empty_map"],
+      "expansions not counted": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_spent_budget_says_neither",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_the_proof_plays_the_one_winning_move"
+      ],
+      "losing move not lost": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "replies not linked": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "move not settled": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_proofs_by_moves_are_kept_with_the_prover_s_so_its_walks_stop_there",
+        "test_the_proof_plays_the_one_winning_move",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "won-at-once move not proved": [
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "OR proof by sum": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_proofs_by_moves_are_kept_with_the_prover_s_so_its_walks_stop_there",
+        "test_the_proof_plays_the_one_winning_move",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "OR disproof by min": [
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "AND proof by min": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_the_proof_plays_the_one_winning_move",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "AND disproof by sum": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "move proof not stored": [
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_proofs_by_moves_are_kept_with_the_prover_s_so_its_walks_stop_there",
+        "test_the_proof_plays_the_one_winning_move"
+      ],
+      "proved by a losing move": [
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_the_proof_plays_the_one_winning_move"
+      ],
+      "update stops at once": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "only the first parent updated": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_position_reached_twice_is_one_node",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "expanded node itself not settled": [
+        "test_a_drawn_position_is_disproved",
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_a_position_reached_twice_is_one_node",
+        "test_a_spent_budget_says_neither",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[False]",
+        "test_every_position_is_proved_exactly_when_its_side_wins_and_each_proof_holds[True]",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_proofs_by_moves_are_kept_with_the_prover_s_so_its_walks_stop_there",
+        "test_the_proof_plays_the_one_winning_move",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ],
+      "maps tried with maps off": [
+        "test_a_move_that_wins_at_once_proves_its_position",
+        "test_maps_cut_the_positions_a_proof_needs",
+        "test_with_no_maps_every_position_is_still_proved_exactly[False]",
+        "test_with_no_maps_every_position_is_still_proved_exactly[True]"
+      ]
+    }
+  }
+}

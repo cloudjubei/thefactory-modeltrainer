@@ -11660,6 +11660,188 @@
         "harness/floor_t4.py": "e365d5adfc6fb402316b8c6d680e50fcd653becd20f54f76cb3647c9763ff1e6",
         "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b"
       }
+    },
+    "h392": {
+      "id": "h392",
+      "claim": "\u00a73.6 T5: T4's game written again with each exception flag also coded under how many exceptions the leaf's walk has read so far, up to two, and how many flags since the last one on a log scale (harness.exception_context under harness.cell_context and harness.level_context over harness.strategy_file) makes exactly the file's bytes, reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to T4's game, and played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_file_reads_back_to_t4_s_game_and_every_line_wins",
+      "note": "Seen before registering: 65 exception-flag contexts simulated on G3's T4 dry-run file (the chosen one 33,698 to 27,285 bits of exception flags); T5's dry run on G3's T4 file, 194,950 bits to 188,537 (0.967), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T4 file was not re-encoded with any exception-flag context.",
+      "registered_at": "2026-11-09T13:23:04.492459+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_file_reads_back_to_t4_s_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1525.20s (0:25:25)",
+          "drawn_at": "2026-11-09T14:32:53.844128+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t5.json.gz",
+        "started": "2026-11-09T13:23:17+00:00"
+      },
+      "pins": {
+        "harness/exception_context.py": "fcc3dca312ebad89b29832e8ebca4f2af8d30afdc5cabfbe9613eab0d600c82c",
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t5.py": "799cd88a536d548d482ea16f45ae8032ff6b3d00b396602f674a58d4d9f6144e",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_exception_context.py": "abc1146ec5771195c195291bc2edbba751e8c9f26026823040a7bcad9de34290",
+        "tests/test_c49_t5_evidence.py": "1ac3b1039414e3b646ce8b5e4b6bacfc7be9502a370f4d450bc81f7f4944c23e",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_reading_is_undecidable"
+    },
+    "h393": {
+      "id": "h393",
+      "claim": "\u00a73.6 T5: that file takes 99/100 of T4's 112,644 bits or less (111,517 bits); 999/1000 of them or more (112,532) refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_file_takes_99_100_of_112_644_bits_or_less",
+      "note": "Seen before registering: 65 exception-flag contexts simulated on G3's T4 dry-run file (the chosen one 33,698 to 27,285 bits of exception flags); T5's dry run on G3's T4 file, 194,950 bits to 188,537 (0.967), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T4 file was not re-encoded with any exception-flag context.",
+      "registered_at": "2026-11-09T13:23:11.510742+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_file_takes_99_100_of_112_644_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1420.32s (0:23:40)",
+          "drawn_at": "2026-11-09T14:56:43.673239+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t5.json.gz",
+        "started": "2026-11-09T13:23:17+00:00"
+      },
+      "pins": {
+        "harness/exception_context.py": "fcc3dca312ebad89b29832e8ebca4f2af8d30afdc5cabfbe9613eab0d600c82c",
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t5.py": "799cd88a536d548d482ea16f45ae8032ff6b3d00b396602f674a58d4d9f6144e",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_exception_context.py": "abc1146ec5771195c195291bc2edbba751e8c9f26026823040a7bcad9de34290",
+        "tests/test_c49_t5_evidence.py": "1ac3b1039414e3b646ce8b5e4b6bacfc7be9502a370f4d450bc81f7f4944c23e",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t5_evidence.py::test_c49_t5_the_size_is_undecidable"
+    },
+    "h394": {
+      "id": "h394",
+      "claim": "\u00a73.6 T5 (after the data): the file takes 109,034 bits (13,630 bytes), 0.9680 of T4's 112,644; every part but the exception flags is T4's, and the exception flags take 14,273.0 bits against 17,883.9, 20.2% fewer, near the 19.0% the same context saved on G3's file in the dry run.",
+      "mode": "test",
+      "proof": "tests/test_c49_t5_after_evidence.py::test_c49_t5_the_file_takes_109_034_bits_and_only_the_exception_flags_changed",
+      "note": "Registered after the data: a description of T5's file, not a prediction.",
+      "registered_at": "2026-11-09T14:57:01.534572+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t5_after_evidence.py::test_c49_t5_the_file_takes_109_034_bits_and_only_the_exception_flags_changed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.12s",
+          "drawn_at": "2026-11-09T14:57:13.646049+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t5.json.gz",
+        "started": "2026-11-09T13:23:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t5_after_evidence.py": "f6ad2d1a8772d435b485f9201a639e3afef191c9d80d5808a4ab847dd7f303f3",
+        "tests/test_c49_t5_evidence.py": "1ac3b1039414e3b646ce8b5e4b6bacfc7be9502a370f4d450bc81f7f4944c23e",
+        "harness/floor_t5.py": "799cd88a536d548d482ea16f45ae8032ff6b3d00b396602f674a58d4d9f6144e",
+        "harness/exception_context.py": "fcc3dca312ebad89b29832e8ebca4f2af8d30afdc5cabfbe9613eab0d600c82c"
+      }
+    },
+    "h395": {
+      "id": "h395",
+      "claim": "\u00a73.6 T8: T5's game written again by harness.position_walk \u2014 each map read again named by its place among the known maps ranked by how many cells of the leaf's board agree with the best of the boards it was read at, either way round, and each exception flag also coded under the plies below its leaf, the maps under harness.level_context's and harness.cell_context's wrappers \u2014 makes exactly the file's bytes, reads back from its bytes, the game's rules, the map rule's settings and the board's mirror alone to T5's game, and played against every reply wins every line.",
+      "mode": "test",
+      "proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_file_reads_back_to_t5_s_game_and_every_line_wins",
+      "note": "Seen before registering: a scratch study on G3's T5 dry-run file (references 28,842 to 24,779 ranked by board likeness; exception flags 27,285 to 26,306 with the plies below the leaf); T8's dry run on G3's T5 file, 188,537 bits to 183,497 (0.973), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T5 file was not re-encoded with the new walk.",
+      "registered_at": "2026-11-10T00:02:47.924044+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_file_reads_back_to_t5_s_game_and_every_line_wins",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1555.00s (0:25:55)",
+          "drawn_at": "2026-11-10T02:27:26.738816+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t8.json.gz",
+        "started": "2026-11-10T00:03:00+00:00"
+      },
+      "pins": {
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f",
+        "harness/exception_context.py": "fcc3dca312ebad89b29832e8ebca4f2af8d30afdc5cabfbe9613eab0d600c82c",
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t8.py": "45d12c27d2d391b4b1bfbd1ff9968e471b38199ccb8d1ca76c5c2b56d201ea5c",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_position_walk.py": "8caf83a82c5526d6cb4b2220360a65537adf50567445f0e4ab0cb392b9199054",
+        "tests/test_c49_t8_evidence.py": "d56d0e46eae34ffec8f01faf2f232699b55273766bf92241f49ba8d311df14ee",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_reading_is_undecidable"
+    },
+    "h396": {
+      "id": "h396",
+      "claim": "\u00a73.6 T8: that file takes 99/100 of T5's 109,034 bits or less (107,943 bits); 999/1000 of them or more (108,925) refutes.",
+      "mode": "test",
+      "proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_file_takes_99_100_of_109_034_bits_or_less",
+      "note": "Seen before registering: a scratch study on G3's T5 dry-run file (references 28,842 to 24,779 ranked by board likeness; exception flags 27,285 to 26,306 with the plies below the leaf); T8's dry run on G3's T5 file, 188,537 bits to 183,497 (0.973), 0 differences, replay skipped; this proof's path run on those files (supported). Z2's T5 file was not re-encoded with the new walk.",
+      "registered_at": "2026-11-10T00:02:48.608193+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_file_takes_99_100_of_109_034_bits_or_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1692.26s (0:28:12)",
+          "drawn_at": "2026-11-10T02:55:52.698513+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t8.json.gz",
+        "started": "2026-11-10T00:03:00+00:00"
+      },
+      "pins": {
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f",
+        "harness/exception_context.py": "fcc3dca312ebad89b29832e8ebca4f2af8d30afdc5cabfbe9613eab0d600c82c",
+        "harness/cell_context.py": "09516ba5130188ab9b3d3215df508007ba9432868e8af6c595ed76d58e5e931b",
+        "harness/level_context.py": "e448aac24836904f0b11df468face2cb537aac991d357f772542a934adde971d",
+        "harness/floor_t8.py": "45d12c27d2d391b4b1bfbd1ff9968e471b38199ccb8d1ca76c5c2b56d201ea5c",
+        "harness/floor_t1.py": "dd3055b561c75f62998b14a5336e7008db43d8786a4710697ed8a740bf7c7f41",
+        "scripts/c4_position_walk.py": "8caf83a82c5526d6cb4b2220360a65537adf50567445f0e4ab0cb392b9199054",
+        "tests/test_c49_t8_evidence.py": "d56d0e46eae34ffec8f01faf2f232699b55273766bf92241f49ba8d311df14ee",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39",
+        "harness/arithmetic_coding.py": "c3ab95d11132d665654a553823bd5d20f89ca5d38984f45bbca54bd11e94cc7a"
+      },
+      "inconclusive_proof": "tests/test_c49_t8_evidence.py::test_c49_t8_the_size_is_undecidable"
+    },
+    "h397": {
+      "id": "h397",
+      "claim": "\u00a73.6 T8 (after the data): the file takes 106,044 bits (13,256 bytes), 0.9726 of T5's 109,034; every part but the references and the exception flags is T5's, the references take 13,331.0 bits against 15,775.1, 15.5% fewer, and the exception flags 13,728.2 against 14,273.0, 3.8% fewer, near the 14.1% and 3.6% the same walk saved on G3's file in the dry run.",
+      "mode": "test",
+      "proof": "tests/test_c49_t8_after_evidence.py::test_c49_t8_the_file_takes_106_044_bits_and_only_the_references_and_exception_flags_changed",
+      "note": "Registered after the data: a description of T8's file, not a prediction.",
+      "registered_at": "2026-11-10T02:56:01.216753+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t8_after_evidence.py::test_c49_t8_the_file_takes_106_044_bits_and_only_the_references_and_exception_flags_changed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.15s",
+          "drawn_at": "2026-11-10T02:56:08.017086+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_t8.json.gz",
+        "started": "2026-11-10T00:03:00+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t8_after_evidence.py": "1027c92725f33f8b9eb6d4c86ac39268598359663aeddbe2e0cc2d1d9f3dc8e1",
+        "tests/test_c49_t8_evidence.py": "d56d0e46eae34ffec8f01faf2f232699b55273766bf92241f49ba8d311df14ee",
+        "harness/floor_t8.py": "45d12c27d2d391b4b1bfbd1ff9968e471b38199ccb8d1ca76c5c2b56d201ea5c",
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f"
+      }
     }
   }
 }

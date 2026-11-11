@@ -1,0 +1,942 @@
+{
+  "file": "harness/self_proof.py",
+  "tests": ["tests/test_self_proof.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "cap ignored",
+      "old": "        if len(seen) > cap:\n            return {\"status\": \"cap\"",
+      "new": "        if False:\n            return {\"status\": \"cap\""
+    },
+    {
+      "name": "deadline ignored",
+      "old": "time.monotonic() > deadline:\n            return {\"status\": \"timeout\"",
+      "new": "False:\n            return {\"status\": \"timeout\""
+    },
+    {
+      "name": "no move not charged",
+      "old": "        nexts = None if move is None else _keyed(",
+      "new": "        nexts = [] if move is None else _keyed("
+    },
+    {
+      "name": "nothing charged",
+      "old": "            charged[key] = None\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "walk stops at the first charge",
+      "old": "            charged[key] = None\n",
+      "new": "            charged[key] = None\n            break\n"
+    },
+    {
+      "name": "own positions not counted",
+      "old": "        own += 1\n        move = choose(",
+      "new": "        move = choose("
+    },
+    {
+      "name": "a drawn move counts as won",
+      "old": "        return [] if game.winner(child) == player else None",
+      "new": "        return []"
+    },
+    {
+      "name": "a won move counts as lost",
+      "old": "        return [] if game.winner(child) == player else None",
+      "new": "        return None"
+    },
+    {
+      "name": "a lost reply ignored",
+      "old": "        elif game.winner(c) != player:\n            return None\n",
+      "new": ""
+    },
+    {
+      "name": "won replies walked on",
+      "old": "        if not game.is_terminal(c):\n            out.append(c)\n        elif",
+      "new": "        if False:\n            out.append(c)\n        elif"
+    },
+    {
+      "name": "search asks the walk with the oracle's",
+      "old": "walker=failing)",
+      "new": "walker=failing if False else None)"
+    },
+    {
+      "name": "proved not remembered",
+      "old": "        if key in self.proved:\n            return True\n        if key in self.refuted",
+      "new": "        if key in self.refuted"
+    },
+    {
+      "name": "refuted not remembered",
+      "old": "        if key in self.refuted:\n            return False\n",
+      "new": ""
+    },
+    {
+      "name": "budget ignored",
+      "old": "        if self._spent():\n            return None\n",
+      "new": ""
+    },
+    {
+      "name": "calls not counted",
+      "old": "        self.calls += 1\n",
+      "new": ""
+    },
+    {
+      "name": "unknown becomes refuted",
+      "old": "        if unknown:\n            return None\n        self.refuted.add(key)",
+      "new": "        self.refuted.add(key)"
+    },
+    {
+      "name": "refutation not stored",
+      "old": "        self.refuted.add(key)\n        return False",
+      "new": "        return False"
+    },
+    {
+      "name": "first proved move not kept",
+      "old": "                self.proved[key] = {\"move\": action}\n                return True",
+      "new": "                return True"
+    },
+    {
+      "name": "unknown move taken as proved",
+      "old": "            if result:\n                self.proved[key] = {\"move\"",
+      "new": "            if result is not False:\n                self.proved[key] = {\"move\""
+    },
+    {
+      "name": "searched move not first",
+      "old": "key=lambda a: (a != first, a)",
+      "new": "key=lambda a: a"
+    },
+    {
+      "name": "max_calls ignored",
+      "old": "(self.max_calls is not None and self.calls >= self.max_calls)",
+      "new": "False"
+    },
+    {
+      "name": "deadline of the prover ignored",
+      "old": "(self.deadline is not None and time.monotonic() > self.deadline)",
+      "new": "False"
+    },
+    {
+      "name": "empty map not tried",
+      "old": "for i in [0, *recent]:",
+      "new": "for i in [*recent]:"
+    },
+    {
+      "name": "recent maps not tried",
+      "old": "for i in [0, *recent]:",
+      "new": "for i in [0]:"
+    },
+    {
+      "name": "window one too wide",
+      "old": "max(0, len(self.maps) - 1 - self.reuse_window), -1)",
+      "new": "max(0, len(self.maps) - 2 - self.reuse_window), -1)"
+    },
+    {
+      "name": "searched map believed",
+      "old": "if not found[\"exceptions\"] and self._wins(state, found[\"levels\"]):",
+      "new": "if not found[\"exceptions\"]:"
+    },
+    {
+      "name": "failing map made a leaf",
+      "old": "if not found[\"exceptions\"] and self._wins(state, found[\"levels\"]):",
+      "new": "if self._wins(state, found[\"levels\"]) or True:"
+    },
+    {
+      "name": "leaf index off",
+      "old": "            self.proved[key] = {\"leaf\": len(self.maps) - 1}",
+      "new": "            self.proved[key] = {\"leaf\": len(self.maps)}"
+    },
+    {
+      "name": "no search result crashes",
+      "old": "        if found is None:\n            return None\n",
+      "new": ""
+    },
+    {
+      "name": "a refuted reply ignored",
+      "old": "            if result is False:\n                return False\n",
+      "new": ""
+    },
+    {
+      "name": "an unknown reply counts as proved",
+      "old": "        return None if unknown else True",
+      "new": "        return True"
+    },
+    {
+      "name": "a losing move counts",
+      "old": "        if replies is None:\n            return False\n        unknown = False\n        for reply",
+      "new": "        if replies is None:\n            return True\n        unknown = False\n        for reply"
+    },
+    {
+      "name": "strategy keeps everything proved",
+      "old": "            nodes[key] = self.proved[key]\n",
+      "new": "            nodes.update(self.proved)\n"
+    },
+    {
+      "name": "strategy stops at the root",
+      "old": "            if \"move\" in nodes[key]:",
+      "new": "            if False:"
+    },
+    {
+      "name": "covering map not verified",
+      "old": "            if self._wins(state, self.maps[i]):",
+      "new": "            if True:"
+    },
+    {
+      "name": "limit ignored",
+      "old": "            if limit is not None and len(charged) > limit:",
+      "new": "            if False:"
+    },
+    {
+      "name": "limit one too tight",
+      "old": "len(charged) > limit:",
+      "new": "len(charged) >= limit:"
+    },
+    {
+      "name": "bounded: unfinished first walk kept",
+      "old": "        if now[\"status\"] != \"ok\":\n            return None\n        walks = 1",
+      "new": "        walks = 1"
+    },
+    {
+      "name": "bounded: start dropped",
+      "old": "        current = dict(start or {})\n        now = failing(",
+      "new": "        current = {}\n        now = failing("
+    },
+    {
+      "name": "bounded: goes on past a winning map",
+      "old": "        while (now[\"exceptions\"] and (evaluations",
+      "new": "        while (True and (evaluations"
+    },
+    {
+      "name": "bounded: evaluations ignored",
+      "old": "(evaluations is None or walks < evaluations)",
+      "new": "True"
+    },
+    {
+      "name": "bounded: one walk too many",
+      "old": "walks < evaluations)",
+      "new": "walks <= evaluations)"
+    },
+    {
+      "name": "bounded: unchanged trial counted",
+      "old": "            if trial == current:\n                continue\n",
+      "new": ""
+    },
+    {
+      "name": "bounded: walks not counted",
+      "old": "            walks += 1\n            r = failing(",
+      "new": "            r = failing("
+    },
+    {
+      "name": "bounded: a cut-short walk kept",
+      "old": "            if r[\"status\"] == \"ok\":\n                current, now = trial, r",
+      "new": "            if True:\n                current, now = trial, r"
+    },
+    {
+      "name": "bounded: nothing kept",
+      "old": "                current, now = trial, r\n",
+      "new": "                pass\n"
+    },
+    {
+      "name": "bounded: always found",
+      "old": "\"status\": \"found\" if not now[\"exceptions\"] else \"budget\"",
+      "new": "\"status\": \"found\""
+    },
+    {
+      "name": "bound ignored",
+      "old": "        if self.search is None or not self._small(state):",
+      "new": "        if self.search is None:"
+    },
+    {
+      "name": "no bound means no search",
+      "old": "        if self.search_below is None:\n            return True",
+      "new": "        if self.search_below is None:\n            return False"
+    },
+    {
+      "name": "memo never stores",
+      "old": "            self.memo[entry] = _keyed(self.game, state, move)\n        return self.memo[entry]",
+      "new": "            return _keyed(self.game, state, move)\n        return self.memo[entry]"
+    },
+    {
+      "name": "memo keyed by position only",
+      "old": "        entry = (key, move)",
+      "new": "        entry = key"
+    },
+    {
+      "name": "memo never cleared",
+      "old": "            if len(self.memo) >= self.limit:\n                self.memo.clear()\n                self.cleared += 1\n",
+      "new": ""
+    },
+    {
+      "name": "memo cleared one entry late",
+      "old": "if len(self.memo) >= self.limit:",
+      "new": "if len(self.memo) > self.limit:"
+    },
+    {
+      "name": "clearings not counted",
+      "old": "                self.cleared += 1\n",
+      "new": ""
+    },
+    {
+      "name": "memo ignored in the walk",
+      "old": "_keyed(game, s, move) if replies is None else replies(s, key, move)",
+      "new": "_keyed(game, s, move)"
+    },
+    {
+      "name": "not simplified",
+      "old": "            kept = simplify(self.facts, state, found[\"levels\"], self.n_levels, self.cap, deadline=self.deadline,\n                            verifier=self._verifier if self.compose else None)",
+      "new": "            kept = found[\"levels\"]"
+    },
+    {
+      "name": "simplified without composition",
+      "old": "verifier=self._verifier if self.compose else None)",
+      "new": "verifier=None)"
+    },
+    {
+      "name": "search not started on the empty cells",
+      "old": "        start = restrict(self.maps[-1], empty)\n",
+      "new": "        start = self.maps[-1]\n"
+    },
+    {
+      "name": "search started from the first map",
+      "old": "        start = restrict(self.maps[-1], empty)\n",
+      "new": "        start = restrict(self.maps[0], empty)\n"
+    },
+    {
+      "name": "search not told what is proved",
+      "old": "found = self.search(state, start, stop=self.proved) if self.compose else self.search(state, start)",
+      "new": "found = self.search(state, start)"
+    },
+    {
+      "name": "bound one too tight",
+      "old": "self.n_levels, None, self.search_below, self.deadline,",
+      "new": "self.n_levels, None, self.search_below - 1, self.deadline,"
+    },
+    {
+      "name": "bound walks past proofs",
+      "old": "                       stop=self.proved if self.compose else None)\n        return walk",
+      "new": "                       stop=None)\n        return walk"
+    },
+    {
+      "name": "bounded: never clears a cell",
+      "old": "    if level == n_levels:\n        trial.pop(cell, None)\n    else:\n        trial[cell] = level",
+      "new": "    trial[cell] = level % n_levels"
+    },
+    {
+      "name": "trial walked without its limit",
+      "old": ", limit=len(now[\"exceptions\"]), replies=memo,",
+      "new": ", replies=memo,"
+    },
+    {
+      "name": "first walk without the memo",
+      "old": "now = failing(facts, state, current, n_levels, None, cap, deadline, replies=memo, trace=trace, stop=stop)",
+      "new": "now = failing(facts, state, current, n_levels, None, cap, deadline, trace=trace, stop=stop)"
+    },
+    {
+      "name": "first walk walks past proofs",
+      "old": "now = failing(facts, state, current, n_levels, None, cap, deadline, replies=memo, trace=trace, stop=stop)",
+      "new": "now = failing(facts, state, current, n_levels, None, cap, deadline, replies=memo, trace=trace)"
+    },
+    {
+      "name": "trials walk past proofs",
+      "old": "                        trace=trace, stop=stop)",
+      "new": "                        trace=trace)"
+    },
+    {
+      "name": "first walk untraced",
+      "old": "now = failing(facts, state, current, n_levels, None, cap, deadline, replies=memo, trace=trace, stop=stop)",
+      "new": "now = failing(facts, state, current, n_levels, None, cap, deadline, replies=memo, stop=stop)"
+    },
+    {
+      "name": "stop ignored",
+      "old": "        if stop is not None and parent is not None and key in stop:\n            continue\n",
+      "new": ""
+    },
+    {
+      "name": "root stopped too",
+      "old": "        if stop is not None and parent is not None and key in stop:",
+      "new": "        if stop is not None and key in stop:"
+    },
+    {
+      "name": "no trace kept",
+      "old": "            came[key] = (s, parent)\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "trace parent lost",
+      "old": "            came[key] = (s, parent)\n",
+      "new": "            came[key] = (s, None)\n"
+    },
+    {
+      "name": "trace not returned",
+      "old": "    return {**out, \"came\": came} if trace else out",
+      "new": "    return out"
+    },
+    {
+      "name": "aimed: last position only",
+      "old": "    places = [s for s in line if not facts.of(s)[0] and len(facts.of(s)[1]) > 1]",
+      "new": "    places = [s for s in line[:1] if not facts.of(s)[0] and len(facts.of(s)[1]) > 1]"
+    },
+    {
+      "name": "aimed: forced positions aimed at",
+      "old": "    places = [s for s in line if not facts.of(s)[0] and len(facts.of(s)[1]) > 1]",
+      "new": "    places = [s for s in line if len(facts.of(s)[1]) > 1]"
+    },
+    {
+      "name": "aimed: the map's own move",
+      "old": "    other = rng.choice([m for m in moves if m != mine])",
+      "new": "    other = rng.choice(moves)"
+    },
+    {
+      "name": "aimed: level not below",
+      "old": "        trial[cell[other]] = rng.randrange(min(top, n_levels))",
+      "new": "        trial[cell[other]] = top"
+    },
+    {
+      "name": "aimed: own move not moved up",
+      "old": "        trial[cell[mine]] = 1\n",
+      "new": "        pass\n"
+    },
+    {
+      "name": "aimed: nothing to aim at gives a trial",
+      "old": "    if not places:\n        return None",
+      "new": "    if not places:\n        return dict(levels)"
+    },
+    {
+      "name": "share ignored",
+      "old": "if share >= 1 or rng.random() < share else None",
+      "new": "if True else None"
+    },
+    {
+      "name": "share inverted",
+      "old": "rng.random() < share else None",
+      "new": "rng.random() >= share else None"
+    },
+    {
+      "name": "aimed search untraced",
+      "old": "    return _climb(facts, n_levels, cap, seconds, evaluations, memo, propose, True)",
+      "new": "    return _climb(facts, n_levels, cap, seconds, evaluations, memo, propose, False)"
+    },
+    {
+      "name": "unchanged trial counted",
+      "old": "            if trial == current:\n                continue\n",
+      "new": ""
+    },
+    {
+      "name": "compose: checked without proofs",
+      "old": "        walk = failing(self.facts, state, levels, self.n_levels, None, self.cap, self.deadline, limit=0,\n                       stop=self.proved)",
+      "new": "        walk = failing(self.facts, state, levels, self.n_levels, None, self.cap, self.deadline, limit=0)"
+    },
+    {
+      "name": "compose: any failing walk accepted",
+      "old": "        return walk[\"status\"] == \"ok\"\n\n    def _verifier",
+      "new": "        return walk[\"status\"] != \"cap\"\n\n    def _verifier"
+    },
+    {
+      "name": "compose: plain check",
+      "old": "        if not self.compose:\n            return verify(",
+      "new": "        if True:\n            return verify("
+    },
+    {
+      "name": "compose: plain export",
+      "old": "        if self.compose:\n            return self._composed(root)",
+      "new": "        if False:\n            return self._composed(root)"
+    },
+    {
+      "name": "export: map not handed on",
+      "old": "                current = node.get(\"leaf\")\n",
+      "new": "                current = current\n"
+    },
+    {
+      "name": "export: unproved positions skipped",
+      "old": "            else:\n                move = choose(self.facts, s, self.maps[current], self.n_levels)\n            stack.append",
+      "new": "            else:\n                continue\n            stack.append"
+    },
+    {
+      "name": "trial limit one too tight",
+      "old": ", limit=len(now[\"exceptions\"]), replies=memo,",
+      "new": ", limit=len(now[\"exceptions\"]) - 1, replies=memo,"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-10T16:47:15+00:00",
+    "killed": 90,
+    "survived": [],
+    "killed_by": {
+      "cap ignored": ["timeout after 120s"],
+      "deadline ignored": [
+        "test_a_walk_past_its_cap_or_deadline_has_no_count",
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish"
+      ],
+      "no move not charged": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_position_the_map_gives_no_move_is_charged",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position"
+      ],
+      "nothing charged": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_is_charged_at_each_position_whose_move_ends_a_line_unwon",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_the_map_gives_no_move_is_charged",
+        "test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at",
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root3-levels3]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.0-False-True]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "walk stops at the first charge": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_is_charged_at_each_position_whose_move_ends_a_line_unwon",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at",
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_remembered_replies_are_stepped_once_however_many_maps_walk_them",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more"
+      ],
+      "own positions not counted": [
+        "test_a_map_is_charged_at_each_position_whose_move_ends_a_line_unwon",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_that_wins_every_line_has_no_failing_position",
+        "test_a_position_the_map_gives_no_move_is_charged",
+        "test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "a drawn move counts as won": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_is_charged_at_each_position_whose_move_ends_a_line_unwon",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved",
+        "test_a_position_with_no_winning_move_is_refuted_and_remembered",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at",
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted",
+        "test_every_position_is_proved_exactly_when_its_side_wins",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "a won move counts as lost": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_map_is_charged_at_each_position_whose_move_ends_a_line_unwon",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_map_that_wins_every_line_has_no_failing_position",
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "a lost reply ignored": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_every_position_is_proved_exactly_when_its_side_wins"
+      ],
+      "won replies walked on": ["timeout after 120s"],
+      "search asks the walk with the oracle's": [
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "proved not remembered": ["test_a_position_is_proved_by_a_move_whose_every_reply_is_proved"],
+      "refuted not remembered": ["test_a_position_with_no_winning_move_is_refuted_and_remembered"],
+      "budget ignored": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "calls not counted": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "unknown becomes refuted": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "refutation not stored": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_position_with_no_winning_move_is_refuted_and_remembered",
+        "test_every_position_is_proved_exactly_when_its_side_wins"
+      ],
+      "first proved move not kept": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_known_map_is_read_again_before_any_search",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_every_position_is_proved_exactly_when_its_side_wins",
+        "test_the_strategy_holds_only_what_the_root_reaches"
+      ],
+      "unknown move taken as proved": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "searched move not first": [
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first"
+      ],
+      "max_calls ignored": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "deadline of the prover ignored": ["test_a_spent_budget_says_neither_and_remembers_nothing"],
+      "empty map not tried": [
+        "test_a_known_map_is_read_again_before_any_search",
+        "test_a_position_a_map_wins_is_proved_by_a_leaf",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_the_bound_never_keeps_a_known_map_from_proving_a_position"
+      ],
+      "recent maps not tried": ["test_a_known_map_is_read_again_before_any_search"],
+      "window one too wide": ["test_a_known_map_is_read_again_before_any_search"],
+      "searched map believed": [
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_searched_map_is_checked_before_it_is_believed"
+      ],
+      "failing map made a leaf": [
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first"
+      ],
+      "leaf index off": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_searched_map_with_no_failing_position_becomes_a_leaf_and_is_simplified",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver"
+      ],
+      "no search result crashes": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_the_search_starts_from_the_last_map_on_the_position_s_empty_cells"
+      ],
+      "a refuted reply ignored": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved",
+        "test_a_position_with_no_winning_move_is_refuted_and_remembered",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted",
+        "test_every_position_is_proved_exactly_when_its_side_wins",
+        "test_the_strategy_holds_only_what_the_root_reaches"
+      ],
+      "an unknown reply counts as proved": [
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted"
+      ],
+      "a losing move counts": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved",
+        "test_a_position_with_no_winning_move_is_refuted_and_remembered",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted",
+        "test_every_position_is_proved_exactly_when_its_side_wins",
+        "test_the_strategy_holds_only_what_the_root_reaches"
+      ],
+      "strategy keeps everything proved": ["test_the_strategy_holds_only_what_the_root_reaches"],
+      "strategy stops at the root": [
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved"
+      ],
+      "covering map not verified": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_known_map_is_read_again_before_any_search",
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_position_is_proved_by_a_move_whose_every_reply_is_proved",
+        "test_a_position_with_no_winning_move_is_refuted_and_remembered",
+        "test_a_searched_map_is_checked_before_it_is_believed",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_a_searched_map_with_no_failing_position_becomes_a_leaf_and_is_simplified",
+        "test_a_spent_budget_says_neither_and_remembers_nothing",
+        "test_an_unknown_reply_leaves_the_position_unknown_not_refuted",
+        "test_every_position_is_proved_exactly_when_its_side_wins",
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[False]",
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver",
+        "test_the_search_starts_from_the_last_map_on_the_position_s_empty_cells"
+      ],
+      "limit ignored": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more"
+      ],
+      "limit one too tight": [
+        "test_a_walk_stops_once_it_is_over_its_limit",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position"
+      ],
+      "bounded: unfinished first walk kept": [
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish"
+      ],
+      "bounded: start dropped": [
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins"
+      ],
+      "bounded: goes on past a winning map": [
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins"
+      ],
+      "bounded: evaluations ignored": ["timeout after 120s"],
+      "bounded: one walk too many": [
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more"
+      ],
+      "bounded: unchanged trial counted": [
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing"
+      ],
+      "bounded: walks not counted": ["timeout after 120s"],
+      "bounded: a cut-short walk kept": [
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more"
+      ],
+      "bounded: nothing kept": [
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins"
+      ],
+      "bounded: always found": [
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_the_bounded_search_gives_nothing_when_its_first_walk_cannot_finish"
+      ],
+      "bound ignored": [
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound"
+      ],
+      "no bound means no search": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_searched_map_with_failing_positions_is_no_leaf_but_its_move_is_tried_first",
+        "test_a_searched_map_with_no_failing_position_becomes_a_leaf_and_is_simplified",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_search_scores_maps_by_their_failing_positions_and_never_asks_a_solver",
+        "test_the_search_starts_from_the_last_map_on_the_position_s_empty_cells"
+      ],
+      "memo never stores": [
+        "test_remembered_replies_are_forgotten_when_full",
+        "test_remembered_replies_are_stepped_once_however_many_maps_walk_them",
+        "test_remembered_replies_never_hold_more_than_their_limit",
+        "test_the_bounded_search_keeps_a_memory_of_its_own_from_its_first_walk_on",
+        "test_the_bounded_search_shares_its_replies_and_finds_what_it_found_without"
+      ],
+      "memo keyed by position only": [
+        "test_remembered_replies_are_stepped_once_however_many_maps_walk_them",
+        "test_remembered_replies_never_hold_more_than_their_limit",
+        "test_the_aimed_search_finds_a_winning_map",
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing",
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position",
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more",
+        "test_the_bounded_search_shares_its_replies_and_finds_what_it_found_without",
+        "test_the_bounded_search_starts_from_the_map_it_is_given_and_stops_at_once_when_it_wins"
+      ],
+      "memo never cleared": [
+        "test_remembered_replies_are_forgotten_when_full",
+        "test_remembered_replies_never_hold_more_than_their_limit"
+      ],
+      "memo cleared one entry late": ["test_remembered_replies_never_hold_more_than_their_limit"],
+      "clearings not counted": [
+        "test_remembered_replies_are_forgotten_when_full",
+        "test_remembered_replies_never_hold_more_than_their_limit"
+      ],
+      "memo ignored in the walk": [
+        "test_remembered_replies_are_forgotten_when_full",
+        "test_remembered_replies_are_stepped_once_however_many_maps_walk_them",
+        "test_the_bounded_search_keeps_a_memory_of_its_own_from_its_first_walk_on",
+        "test_the_bounded_search_shares_its_replies_and_finds_what_it_found_without"
+      ],
+      "not simplified": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_searched_map_with_no_failing_position_becomes_a_leaf_and_is_simplified"
+      ],
+      "simplified without composition": ["test_a_composing_prover_simplifies_by_the_composed_walk"],
+      "search not started on the empty cells": [
+        "test_the_search_starts_from_the_last_map_on_the_position_s_empty_cells"
+      ],
+      "search started from the first map": [
+        "test_the_search_starts_from_the_last_map_on_the_position_s_empty_cells"
+      ],
+      "search not told what is proved": [
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]"
+      ],
+      "bound one too tight": [
+        "test_a_map_is_searched_for_only_where_the_empty_map_s_walk_is_within_the_bound"
+      ],
+      "bound walks past proofs": [
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]"
+      ],
+      "bounded: never clears a cell": [
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing"
+      ],
+      "trial walked without its limit": [
+        "test_the_bounded_search_never_keeps_a_map_that_fails_more"
+      ],
+      "first walk without the memo": [
+        "test_the_bounded_search_keeps_a_memory_of_its_own_from_its_first_walk_on"
+      ],
+      "first walk walks past proofs": [
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]"
+      ],
+      "trials walk past proofs": [
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]"
+      ],
+      "first walk untraced": [
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "stop ignored": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at"
+      ],
+      "root stopped too": ["test_a_walk_does_not_go_past_a_position_it_is_told_to_stop_at"],
+      "no trace kept": [
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root0-levels0]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root1-levels1]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root3-levels3]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "trace parent lost": [
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root0-levels0]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root1-levels1]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root2-levels2]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]"
+      ],
+      "trace not returned": [
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root0-levels0]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root1-levels1]",
+        "test_a_traced_walk_gives_the_line_to_each_charged_position[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root3-levels3]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "aimed: last position only": [
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]"
+      ],
+      "aimed: forced positions aimed at": [
+        "test_an_aimed_trial_does_not_aim_at_a_position_with_a_win_now"
+      ],
+      "aimed: the map's own move": [
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root3-levels3]"
+      ],
+      "aimed: level not below": [
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root0-levels0]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root2-levels2]",
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root3-levels3]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "aimed: own move not moved up": [
+        "test_an_aimed_trial_plays_another_move_on_a_line_that_failed[root1-levels1]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "aimed: nothing to aim at gives a trial": [
+        "test_an_aimed_trial_does_not_aim_at_a_position_with_a_win_now",
+        "test_an_aimed_trial_has_nothing_to_aim_at_when_no_position_on_a_failed_line_has_a_choice"
+      ],
+      "share ignored": [
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.0-False-True]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]"
+      ],
+      "share inverted": ["test_the_aimed_search_aims_its_share_of_the_trials[0.0-False-True]"],
+      "aimed search untraced": [
+        "test_the_aimed_search_aims_its_share_of_the_trials[0.5-False-False]",
+        "test_the_aimed_search_aims_its_share_of_the_trials[1.0-True-False]",
+        "test_the_aimed_search_finds_a_winning_map"
+      ],
+      "unchanged trial counted": [
+        "test_the_bounded_search_clears_a_cell_and_does_not_count_a_change_that_changes_nothing"
+      ],
+      "compose: checked without proofs": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_every_walk_of_a_composing_prover_stops_at_its_proofs[True]"
+      ],
+      "compose: any failing walk accepted": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_composing_search_is_told_what_is_proved",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins"
+      ],
+      "compose: plain check": [
+        "test_a_composing_prover_simplifies_by_the_composed_walk",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins"
+      ],
+      "compose: plain export": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_the_composed_export_follows_a_map_through_positions_it_has_not_proved"
+      ],
+      "export: map not handed on": [
+        "test_a_composing_prover_proves_exactly_the_won_positions_and_each_proof_checks",
+        "test_a_map_need_only_win_the_lines_no_proof_below_already_wins",
+        "test_the_composed_export_follows_a_map_through_positions_it_has_not_proved"
+      ],
+      "export: unproved positions skipped": [
+        "test_the_composed_export_follows_a_map_through_positions_it_has_not_proved"
+      ],
+      "trial limit one too tight": [
+        "test_the_bounded_search_climbs_down_to_a_map_with_no_failing_position"
+      ]
+    }
+  }
+}

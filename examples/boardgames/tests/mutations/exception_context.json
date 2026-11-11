@@ -1,0 +1,219 @@
+{
+  "file": "harness/exception_context.py",
+  "tests": ["tests/test_exception_context.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "two exceptions become one",
+      "old": "ONES = 2",
+      "new": "ONES = 1"
+    },
+    {
+      "name": "three exceptions",
+      "old": "ONES = 2",
+      "new": "ONES = 3"
+    },
+    {
+      "name": "exceptions uncapped",
+      "old": "return min(ones, ONES), (gap + 1).bit_length() - 1",
+      "new": "return ones, (gap + 1).bit_length() - 1"
+    },
+    {
+      "name": "exceptions dropped",
+      "old": "return min(ones, ONES), (gap + 1).bit_length() - 1",
+      "new": "return 0, (gap + 1).bit_length() - 1"
+    },
+    {
+      "name": "gap dropped",
+      "old": "return min(ones, ONES), (gap + 1).bit_length() - 1",
+      "new": "return min(ones, ONES), 0"
+    },
+    {
+      "name": "gap not on a log scale",
+      "old": "(gap + 1).bit_length() - 1",
+      "new": "min(gap, 3)"
+    },
+    {
+      "name": "gap off by one",
+      "old": "(gap + 1).bit_length() - 1",
+      "new": "gap.bit_length()"
+    },
+    {
+      "name": "walk not started afresh",
+      "old": "            self.ones, self.gap = 0, 0\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "started afresh on every call",
+      "old": "        if family == \"excepted\":\n            self.ones, self.gap = 0, 0",
+      "new": "        if family != \"exception_flags\":\n            self.ones, self.gap = 0, 0"
+    },
+    {
+      "name": "flag under its old context",
+      "old": "value = self.io.symbol(family, exception_context(self.ones, self.gap), n, value)",
+      "new": "value = self.io.symbol(family, context, n, value)"
+    },
+    {
+      "name": "flag value not passed",
+      "old": "exception_context(self.ones, self.gap), n, value)",
+      "new": "exception_context(self.ones, self.gap), n, 0)"
+    },
+    {
+      "name": "gap not reset on an exception",
+      "old": "(self.ones + 1, 0) if value",
+      "new": "(self.ones + 1, self.gap + 1) if value"
+    },
+    {
+      "name": "exception not counted",
+      "old": "(self.ones + 1, 0) if value",
+      "new": "(self.ones, 0) if value"
+    },
+    {
+      "name": "gap not counted",
+      "old": "else (self.ones, self.gap + 1)",
+      "new": "else (self.ones, self.gap)"
+    },
+    {
+      "name": "other families dropped",
+      "old": "            return self.io.symbol(family, context, n, value)",
+      "new": "            return self.io.symbol(family, context, n, 0)"
+    },
+    {
+      "name": "uniform's value dropped",
+      "old": "return self.io.uniform(family, n, value)",
+      "new": "return self.io.uniform(family, n, 0)"
+    },
+    {
+      "name": "maps not in context",
+      "old": "return LevelContext(CellContext(ExceptionContext(io), cols), cols)",
+      "new": "return ExceptionContext(io)"
+    },
+    {
+      "name": "cells not in context",
+      "old": "return LevelContext(CellContext(ExceptionContext(io), cols), cols)",
+      "new": "return LevelContext(ExceptionContext(io), cols)"
+    },
+    {
+      "name": "flags not in context",
+      "old": "return LevelContext(CellContext(ExceptionContext(io), cols), cols)",
+      "new": "return LevelContext(CellContext(io, cols), cols)"
+    },
+    {
+      "name": "width from the height",
+      "old": "cols = facts.game.board_shape[1]",
+      "new": "cols = facts.game.board_shape[0] + 1"
+    },
+    {
+      "name": "parts dropped",
+      "old": "return data, bits, io.parts",
+      "new": "return data, bits, {}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-09T12:05:34+00:00",
+    "killed": 21,
+    "survived": [],
+    "killed_by": {
+      "two exceptions become one": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context"
+      ],
+      "three exceptions": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context"
+      ],
+      "exceptions uncapped": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context"
+      ],
+      "exceptions dropped": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh"
+      ],
+      "gap dropped": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh"
+      ],
+      "gap not on a log scale": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context"
+      ],
+      "gap off by one": [
+        "test_a_flag_reads_the_exceptions_so_far_and_the_flags_since_the_last_one",
+        "test_each_flag_is_coded_under_its_context"
+      ],
+      "walk not started afresh": ["test_each_leaf_s_walk_starts_afresh"],
+      "started afresh on every call": ["test_each_leaf_s_walk_starts_afresh"],
+      "flag under its old context": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh",
+        "test_only_the_exception_flags_cost_changes[fixture0]"
+      ],
+      "flag value not passed": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh",
+        "test_every_other_call_is_cell_context_s_own[fixture0]",
+        "test_every_other_call_is_cell_context_s_own[fixture1]",
+        "test_only_the_exception_flags_cost_changes[fixture0]",
+        "test_the_board_s_width_comes_from_the_game[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture1]"
+      ],
+      "gap not reset on an exception": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh"
+      ],
+      "exception not counted": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh"
+      ],
+      "gap not counted": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh"
+      ],
+      "other families dropped": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_each_leaf_s_walk_starts_afresh",
+        "test_every_other_call_is_cell_context_s_own[fixture0]",
+        "test_every_other_call_is_cell_context_s_own[fixture1]",
+        "test_only_the_exception_flags_cost_changes[fixture0]",
+        "test_only_the_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game[fixture0]",
+        "test_the_board_s_width_comes_from_the_game[fixture1]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture1]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture2]"
+      ],
+      "uniform's value dropped": [
+        "test_each_flag_is_coded_under_its_context",
+        "test_every_other_call_is_cell_context_s_own[fixture0]",
+        "test_the_board_s_width_comes_from_the_game[fixture0]",
+        "test_the_board_s_width_comes_from_the_game[fixture1]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture2]"
+      ],
+      "maps not in context": [
+        "test_only_the_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game[fixture1]"
+      ],
+      "cells not in context": [
+        "test_only_the_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game[fixture1]"
+      ],
+      "flags not in context": [
+        "test_only_the_exception_flags_cost_changes[fixture0]",
+        "test_the_board_s_width_comes_from_the_game[fixture0]"
+      ],
+      "width from the height": [
+        "test_only_the_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game[fixture1]"
+      ],
+      "parts dropped": [
+        "test_only_the_exception_flags_cost_changes[fixture0]",
+        "test_only_the_exception_flags_cost_changes[fixture1]"
+      ]
+    }
+  }
+}

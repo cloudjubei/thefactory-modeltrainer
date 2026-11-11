@@ -1,0 +1,104 @@
+{
+  "file": "harness/floor_t8.py",
+  "tests": ["tests/test_floor_t8.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "spec not checked",
+      "old": "if (e.get(\"spec\") != \"harness.floor_t8\" or ",
+      "new": "if ("
+    },
+    {
+      "name": "source not checked",
+      "old": "e.get(\"source_sha256\") != source.get(\"sha256\")\n            or ",
+      "new": ""
+    },
+    {
+      "name": "control not checked",
+      "old": "\n            or source.get(\"bits\") != spec[\"control_bits\"]",
+      "new": ""
+    },
+    {
+      "name": "bits not compared",
+      "old": "read[\"bits\"] != e[\"bits\"] or ",
+      "new": ""
+    },
+    {
+      "name": "differences ignored",
+      "old": "read[\"differences\"] or ",
+      "new": ""
+    },
+    {
+      "name": "lost replay ignored",
+      "old": "not replay[\"won\"] or ",
+      "new": ""
+    },
+    {
+      "name": "leaves not compared",
+      "old": " or replay[\"leaves\"] != read[\"leaves\"]",
+      "new": ""
+    },
+    {
+      "name": "support exclusive",
+      "old": "den * bits <= num * control",
+      "new": "den * bits < num * control"
+    },
+    {
+      "name": "refute exclusive",
+      "old": "rden * bits >= rnum * control",
+      "new": "rden * bits > rnum * control"
+    },
+    {
+      "name": "refute bar is support",
+      "old": "rden * bits >= rnum * control",
+      "new": "den * bits > num * control"
+    },
+    {
+      "name": "support from 109,034",
+      "old": "\"control_bits\": 109_034,",
+      "new": "\"control_bits\": 109_033,"
+    },
+    {
+      "name": "other bars",
+      "old": "\"support\": (99, 100), \"refute\": (999, 1000)",
+      "new": "\"support\": (98, 100), \"refute\": (999, 1000)"
+    },
+    {
+      "name": "other refute bar",
+      "old": "\"refute\": (999, 1000)",
+      "new": "\"refute\": (1, 1)"
+    },
+    {
+      "name": "source is T4's",
+      "old": "\"source\": T5[\"file\"]",
+      "new": "\"source\": \"c49_t4.json.gz\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-09T21:14:12+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "spec not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "source not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "control not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "bits not compared": ["test_a_file_of_another_length_refutes"],
+      "differences ignored": ["test_a_file_that_reads_back_differently_refutes"],
+      "lost replay ignored": ["test_a_lost_replay_refutes_and_has_no_size"],
+      "leaves not compared": ["test_a_replay_of_other_leaves_refutes"],
+      "support exclusive": ["test_the_size_bars_are_inclusive"],
+      "refute exclusive": ["test_the_size_bars_are_inclusive"],
+      "refute bar is support": ["test_the_size_bars_are_inclusive"],
+      "support from 109,034": ["test_the_spec_writes_t5_s_game_under_its_rule"],
+      "other bars": [
+        "test_the_size_bars_are_inclusive",
+        "test_the_spec_writes_t5_s_game_under_its_rule"
+      ],
+      "other refute bar": [
+        "test_the_size_bars_are_inclusive",
+        "test_the_spec_writes_t5_s_game_under_its_rule"
+      ],
+      "source is T4's": ["test_the_spec_writes_t5_s_game_under_its_rule"]
+    }
+  }
+}

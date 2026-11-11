@@ -1,0 +1,378 @@
+{
+  "file": "harness/position_walk.py",
+  "tests": ["tests/test_position_walk.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "plies not on a log scale",
+      "old": "return (plies + 1).bit_length() - 1",
+      "new": "return min(plies, 3)"
+    },
+    {
+      "name": "plies off by one",
+      "old": "return (plies + 1).bit_length() - 1",
+      "new": "return plies.bit_length()"
+    },
+    {
+      "name": "likeness one way round",
+      "old": "agree = np.maximum((np.array(boards) == board).sum(1), (np.array(mirrored) == board).sum(1))",
+      "new": "agree = (np.array(boards) == board).sum(1)"
+    },
+    {
+      "name": "likeness mirrored only",
+      "old": "agree = np.maximum((np.array(boards) == board).sum(1), (np.array(mirrored) == board).sum(1))",
+      "new": "agree = (np.array(mirrored) == board).sum(1)"
+    },
+    {
+      "name": "likeness counts disagreement",
+      "old": "(np.array(boards) == board).sum(1), (np.array(mirrored) == board).sum(1)",
+      "new": "(np.array(boards) != board).sum(1), (np.array(mirrored) != board).sum(1)"
+    },
+    {
+      "name": "last board, not best",
+      "old": "np.maximum.at(best, np.array(used), agree)",
+      "new": "best[np.array(used)] = agree"
+    },
+    {
+      "name": "unread maps rank like read ones",
+      "old": "best = np.full(n_maps, -1)",
+      "new": "best = np.full(n_maps, 99)"
+    },
+    {
+      "name": "least alike first",
+      "old": "return sorted(order, key=lambda k: -score[k])",
+      "new": "return sorted(order, key=lambda k: score[k])"
+    },
+    {
+      "name": "move-to-front only",
+      "old": "return sorted(order, key=lambda k: -score[k])",
+      "new": "return list(order)"
+    },
+    {
+      "name": "ties by map number",
+      "old": "return sorted(order, key=lambda k: -score[k])",
+      "new": "return sorted(order, key=lambda k: (-score[k], k))"
+    },
+    {
+      "name": "depth from the root's stones",
+      "old": "depth_context(empty - len(facts.empty_cells(s)))",
+      "new": "depth_context(len(facts.empty_cells(s)))"
+    },
+    {
+      "name": "depth dropped",
+      "old": "context = (*exception_context(ones, gap), depth_context(empty - len(facts.empty_cells(s))))",
+      "new": "context = exception_context(ones, gap)"
+    },
+    {
+      "name": "walk context dropped",
+      "old": "context = (*exception_context(ones, gap), depth_context(",
+      "new": "context = (0, 0, depth_context("
+    },
+    {
+      "name": "exception not counted",
+      "old": "(ones + 1, 0) if flagged",
+      "new": "(ones, 0) if flagged"
+    },
+    {
+      "name": "gap not reset",
+      "old": "(ones + 1, 0) if flagged",
+      "new": "(ones + 1, gap + 1) if flagged"
+    },
+    {
+      "name": "gap not counted",
+      "old": "else (ones, gap + 1)",
+      "new": "else (ones, gap)"
+    },
+    {
+      "name": "flag value not passed",
+      "old": "io.symbol(\"exception_flags\", context, 2, None if known is None else int(fix is not None))",
+      "new": "io.symbol(\"exception_flags\", context, 2, None if known is None else 0)"
+    },
+    {
+      "name": "forced exception allowed",
+      "old": "            if fix is not None:\n                raise ValueError",
+      "new": "            if False:\n                raise ValueError"
+    },
+    {
+      "name": "undefined position flagged",
+      "old": "        if move is None:\n            picks = safe",
+      "new": "        if move is None and False:\n            picks = safe"
+    },
+    {
+      "name": "exception may be the rule's move",
+      "old": "picks = [m for m in safe if m != move] if flagged else None",
+      "new": "picks = list(safe) if flagged else None"
+    },
+    {
+      "name": "exception not kept",
+      "old": "            out[key] = move\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "opponent replies skipped",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))\n            continue\n        safe",
+      "new": "            continue\n        safe"
+    },
+    {
+      "name": "named by move-to-front place",
+      "old": "at = None if node is None else choices.index(known[node[\"leaf\"]]) + 1",
+      "new": "at = None if node is None else order.index(known[node[\"leaf\"]]) + 1"
+    },
+    {
+      "name": "read back by move-to-front place",
+      "old": "        index = choices[at - 1]\n",
+      "new": "        index = order[at - 1]\n"
+    },
+    {
+      "name": "board not remembered",
+      "old": "    read[\"boards\"].append(board)\n    read[\"mirrored\"].append(_board(facts, image(s)))\n    read[\"used\"].append(index)\n",
+      "new": ""
+    },
+    {
+      "name": "mirror image not the mirror",
+      "old": "read[\"mirrored\"].append(_board(facts, image(s)))",
+      "new": "read[\"mirrored\"].append(board)"
+    },
+    {
+      "name": "map not front",
+      "old": "    order.insert(0, index)\n",
+      "new": "    order.append(index)\n"
+    },
+    {
+      "name": "empty map mirrored allowed",
+      "old": "        if index == 0 and flag:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "mirrored exceptions allowed",
+      "old": "        if wanted:\n            raise ValueError",
+      "new": "        if False:\n            raise ValueError"
+    },
+    {
+      "name": "new map not known",
+      "old": "            known[node[\"leaf\"]] = index\n",
+      "new": "            pass\n"
+    },
+    {
+      "name": "new map on the plain board",
+      "old": "frame = set(facts.empty_cells(image(s) if mirrored else s))",
+      "new": "frame = set(facts.empty_cells(s))"
+    },
+    {
+      "name": "excepted context dropped",
+      "old": "io.symbol(\"excepted\", (at == 0, index == 0), 2",
+      "new": "io.symbol(\"excepted\", 0, 2"
+    },
+    {
+      "name": "kind context dropped",
+      "old": "io.symbol(\"kind\", stones, 2",
+      "new": "io.symbol(\"kind\", 0, 2"
+    },
+    {
+      "name": "position read twice",
+      "old": "        if key in seen or game.is_terminal(s):\n            continue\n        seen.add(key)\n        if game.current_player(s) != player:\n            stack.extend(reversed(",
+      "new": "        if game.is_terminal(s):\n            continue\n        seen.add(key)\n        if game.current_player(s) != player:\n            stack.extend(reversed("
+    },
+    {
+      "name": "replies in the other order",
+      "old": "stack.extend(reversed([game.step(s, b) for b in game.legal_actions(s)]))",
+      "new": "stack.extend([game.step(s, b) for b in game.legal_actions(s)])"
+    },
+    {
+      "name": "maps not in context",
+      "old": "return LevelContext(CellContext(io, cols), cols)",
+      "new": "return io"
+    },
+    {
+      "name": "cells not in context",
+      "old": "return LevelContext(CellContext(io, cols), cols)",
+      "new": "return LevelContext(io, cols)"
+    },
+    {
+      "name": "width from the height",
+      "old": "cols = facts.game.board_shape[1]",
+      "new": "cols = facts.game.board_shape[0] + 1"
+    },
+    {
+      "name": "parts dropped",
+      "old": "return data, bits, io.parts",
+      "new": "return data, bits, {}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-09T21:13:57+00:00",
+    "killed": 39,
+    "survived": [],
+    "killed_by": {
+      "plies not on a log scale": [
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf",
+        "test_the_plies_below_the_leaf_are_read_on_a_log_scale"
+      ],
+      "plies off by one": [
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf",
+        "test_the_plies_below_the_leaf_are_read_on_a_log_scale"
+      ],
+      "likeness one way round": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_a_map_s_likeness_is_its_best_agreement_either_way_round"
+      ],
+      "likeness mirrored only": ["test_a_map_s_likeness_is_its_best_agreement_either_way_round"],
+      "likeness counts disagreement": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_a_map_s_likeness_is_its_best_agreement_either_way_round"
+      ],
+      "last board, not best": ["test_a_map_s_likeness_is_its_best_agreement_either_way_round"],
+      "unread maps rank like read ones": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_a_map_s_likeness_is_its_best_agreement_either_way_round"
+      ],
+      "least alike first": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]",
+        "test_the_most_alike_map_comes_first_and_ties_keep_move_to_front"
+      ],
+      "move-to-front only": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_the_most_alike_map_comes_first_and_ties_keep_move_to_front"
+      ],
+      "ties by map number": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_the_most_alike_map_comes_first_and_ties_keep_move_to_front"
+      ],
+      "depth from the root's stones": [
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf"
+      ],
+      "depth dropped": [
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture0]"
+      ],
+      "walk context dropped": ["test_each_exception_flag_also_reads_the_plies_below_its_leaf"],
+      "exception not counted": ["test_each_exception_flag_also_reads_the_plies_below_its_leaf"],
+      "gap not reset": ["test_each_exception_flag_also_reads_the_plies_below_its_leaf"],
+      "gap not counted": ["test_each_exception_flag_also_reads_the_plies_below_its_leaf"],
+      "flag value not passed": [
+        "test_an_exception_playing_the_map_s_own_move_is_refused",
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture1]"
+      ],
+      "forced exception allowed": ["test_an_exception_on_a_forced_position_is_refused"],
+      "undefined position flagged": [
+        "test_a_position_the_map_leaves_undefined_reads_an_exception_with_no_flag",
+        "test_an_undefined_position_with_no_exception_is_refused"
+      ],
+      "exception may be the rule's move": [
+        "test_an_exception_playing_the_map_s_own_move_is_refused",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture0]"
+      ],
+      "exception not kept": [
+        "test_a_position_the_map_leaves_undefined_reads_an_exception_with_no_flag",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture1]"
+      ],
+      "opponent replies skipped": [
+        "test_each_exception_flag_also_reads_the_plies_below_its_leaf",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture0]",
+        "test_the_strategy_reads_back_from_the_bytes[fixture0]"
+      ],
+      "named by move-to-front place": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[fixture2]"
+      ],
+      "read back by move-to-front place": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_the_board_s_width_comes_from_the_game",
+        "test_the_strategy_reads_back_from_the_bytes[fixture2]"
+      ],
+      "board not remembered": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness"
+      ],
+      "mirror image not the mirror": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness"
+      ],
+      "map not front": ["test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness"],
+      "empty map mirrored allowed": ["test_the_empty_map_is_never_mirrored"],
+      "mirrored exceptions allowed": ["test_a_mirrored_leaf_with_exceptions_is_refused"],
+      "new map not known": [
+        "test_a_map_is_named_by_its_place_among_the_maps_ranked_by_likeness",
+        "test_a_map_read_both_ways_is_paid_once",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_maps_come_back_in_first_use_order",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]"
+      ],
+      "new map on the plain board": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture5]"
+      ],
+      "excepted context dropped": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture6]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]"
+      ],
+      "kind context dropped": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture5]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture6]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]"
+      ],
+      "position read twice": ["test_a_position_reached_twice_is_read_once"],
+      "replies in the other order": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_maps_come_back_in_first_use_order",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]"
+      ],
+      "maps not in context": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture5]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game"
+      ],
+      "cells not in context": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture5]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game"
+      ],
+      "width from the height": [
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture0]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture1]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture2]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture3]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture4]",
+        "test_every_call_but_the_references_and_exception_flags_is_the_t5_coder_s[fixture5]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]",
+        "test_the_board_s_width_comes_from_the_game"
+      ],
+      "parts dropped": [
+        "test_only_the_references_and_exception_flags_cost_changes[fixture0]",
+        "test_only_the_references_and_exception_flags_cost_changes[fixture1]",
+        "test_the_file_is_as_long_as_its_parts"
+      ]
+    }
+  }
+}

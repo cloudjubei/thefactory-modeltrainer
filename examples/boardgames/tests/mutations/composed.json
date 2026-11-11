@@ -1,0 +1,99 @@
+{
+  "file": "harness/composed.py",
+  "tests": ["tests/test_composed.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "lost line accepted",
+      "old": "            if game.winner(s) != player:\n                return {\"won\": False, \"reason\": \"lost\"}",
+      "new": "            if False:\n                return {\"won\": False, \"reason\": \"lost\"}"
+    },
+    {
+      "name": "cap ignored",
+      "old": "        if len(seen) > cap:",
+      "new": "        if False:"
+    },
+    {
+      "name": "replies not walked",
+      "old": "            stack.extend((game.step(s, b), current) for b in game.legal_actions(s))\n            continue",
+      "new": "            continue"
+    },
+    {
+      "name": "mirrored accepted",
+      "old": "if node is not None and (\"mirrored\" in node or \"exceptions\" in node):",
+      "new": "if node is not None and \"exceptions\" in node:"
+    },
+    {
+      "name": "exceptions accepted",
+      "old": "if node is not None and (\"mirrored\" in node or \"exceptions\" in node):",
+      "new": "if node is not None and \"mirrored\" in node:"
+    },
+    {
+      "name": "illegal move accepted",
+      "old": "            if node[\"move\"] not in game.legal_actions(s):",
+      "new": "            if False:"
+    },
+    {
+      "name": "map kept after a move node",
+      "old": "            move, current = node[\"move\"], None",
+      "new": "            move = node[\"move\"]"
+    },
+    {
+      "name": "leaf does not switch map",
+      "old": "            if node is not None:\n                current = node[\"leaf\"]",
+      "new": "            if node is not None and current is None:\n                current = node[\"leaf\"]"
+    },
+    {
+      "name": "undefined accepted",
+      "old": "            if move is None:\n                return {\"won\": False, \"reason\": \"undefined\"}",
+      "new": "            if move is None:\n                continue"
+    },
+    {
+      "name": "position seen once whatever the map",
+      "old": "        if (key, current) in seen:\n            continue\n        seen.add((key, current))",
+      "new": "        if key in seen:\n            continue\n        seen.add(key)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-10T16:47:19+00:00",
+    "killed": 10,
+    "survived": [],
+    "killed_by": {
+      "lost line accepted": [
+        "test_a_leaf_below_hands_play_to_its_own_map",
+        "test_a_leaf_whose_map_loses_a_line_is_not_won",
+        "test_a_node_below_a_leaf_takes_over_from_its_map",
+        "test_a_position_two_maps_reach_is_played_by_each[1-2]",
+        "test_a_position_two_maps_reach_is_played_by_each[2-1]"
+      ],
+      "cap ignored": ["test_a_walk_past_its_cap_stops"],
+      "replies not walked": [
+        "test_a_leaf_below_hands_play_to_its_own_map",
+        "test_a_leaf_whose_map_loses_a_line_is_not_won",
+        "test_a_map_stops_at_a_move_node",
+        "test_a_node_below_a_leaf_takes_over_from_its_map",
+        "test_a_position_two_maps_reach_is_played_by_each[1-2]",
+        "test_a_position_two_maps_reach_is_played_by_each[2-1]",
+        "test_after_a_move_node_every_position_of_the_side_needs_a_node"
+      ],
+      "mirrored accepted": [
+        "test_mirrored_readings_and_exceptions_are_not_part_of_a_composed_strategy"
+      ],
+      "exceptions accepted": [
+        "test_mirrored_readings_and_exceptions_are_not_part_of_a_composed_strategy"
+      ],
+      "illegal move accepted": ["test_a_move_node_whose_move_is_not_legal_is_refused"],
+      "map kept after a move node": ["test_a_map_stops_at_a_move_node"],
+      "leaf does not switch map": ["test_a_leaf_below_hands_play_to_its_own_map"],
+      "undefined accepted": [
+        "test_a_map_stops_at_a_move_node",
+        "test_a_map_that_gives_no_move_is_undefined",
+        "test_a_node_below_a_leaf_takes_over_from_its_map",
+        "test_after_a_move_node_every_position_of_the_side_needs_a_node"
+      ],
+      "position seen once whatever the map": [
+        "test_a_position_two_maps_reach_is_played_by_each[2-1]"
+      ]
+    }
+  }
+}

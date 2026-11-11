@@ -36,6 +36,18 @@
 
 ## Rules for every experiment
 
+- **A solver is a yardstick, never a means (user, 2026-10-02; restated 2026-11-10).** An exact solver for a game may
+  grade a result. It may not choose moves, build opening tables, score candidates or label training data: the goal is
+  a process for games that have no solver. Before building or launching anything, check where the process reads a
+  solver, label cache or oracle; if it does anywhere but the grading, say so first, and call the result
+  oracle-assisted. Knowledge the process computes itself (proofs by its own verifier, tables it derives) is allowed.
+- **Check a step against the north star before taking it.** Each new step states which north-star goal it serves. A
+  step that only polishes an oracle-assisted result, or only measures an outside benchmark, is a side step: say so
+  and ask before spending on it.
+- **Search the record before a new study.** Before proposing or building one, search the register
+  (`hypotheses.json`), `process-knowledge.md` and this plan for claims on the same idea; start from what they found.
+- **Record everything here, as it happens.** Plans go in this file, findings in `experiment-journal.md`, results in
+  the register and `knowledge_map.json`, the story in `research/`. A decision that lives only in a chat is lost.
 - **Pre-register before the data.** A claim in the register, with:
   - a proof test (and an undecidable proof where a gate can fail);
   - the data file it will read;
@@ -236,6 +248,11 @@ rule standalone and in decision-list order, by ply.
 - **3.5 Feeding self-play (R → L).** One pre-registered experiment each for labels, features and search pruning.
   A rule counts as feeding only if a fresh self-play agent measurably improves with it.
 
+- **Status of 3.6 (2026-11-10): oracle-assisted.** Everything in 3.6 was found with an exact Connect-4 solver in the
+  search (`harness/c4_oracle.py`, `c4solver.c`): the opening table, the builder's winning moves and the local
+  search's score. Only the rule language, the verifying walk and the file are solver-free. Its file of 106,044 bits
+  shows what the representation can hold when the winning moves are known. It does not meet the solver rule above;
+  3.7 is the work that must.
 - **3.6 S1 — discovered steady states at the table's frontier (user, 2026-10-05; design after the research below).**
   - Why: WeakC4 plays all of Connect-4 for the first player in ~12 KB — an opening tree of <2,600 nodes whose ~1,700
     leaves are "steady states" (win; block; else a per-square priority map), found by search (GA, later SAT) and
@@ -704,6 +721,32 @@ rule standalone and in decision-list order, by ply.
     candidates (flags 51,994 to 46,828; file 200,115 to 194,950). It reads back to T3's game with 0 differences and all
     3,372 leaves won in the run's replay. Only the flags change: 30,949 to 27,995 bits, 9.5% fewer (9.9% on G3).
     22:41Z–23:38Z. Left: levels 43,495, flags 27,995, exception flags 17,884, references 15,775.
+  - **T5 result (h392, h393 supported — pre-registered; h394 after the data): the file takes 109,034 bits (13,630
+    bytes), 0.9680 of T4's 112,644.** User's choice after T4: the exception flags coded in context.
+    `harness/exception_context.py` (a third wrapper, under T4's: a flag's context is how many exceptions the leaf's walk
+    has read so far, up to two, and how many flags since the last one, on a log scale), `harness/floor_t5.py`,
+    `scripts/c4_exception_context.py` (20 tests, 35/35 mutants). Context chosen on G3's T4 file from 65 candidates
+    (exception flags 33,698 to 27,285; file 194,950 to 188,537). It reads back to T4's game with 0 differences and all
+    3,372 leaves won in the run's replay. Only the exception flags change: 17,884 to 14,273 bits, 20.2% fewer (19.0% on
+    G3). 13:23Z–14:07Z. Left: levels 43,495, cell flags 27,995, references 15,775, exception flags 14,273.
+  - **T6 dropped (user's call, 2026-11-09):** the map references coded in context. A scratch study on G3's file
+    (never proven) found 2.5% of the references at best from what a wrapper sees, about 0.4% of the file, under the
+    99/100 bar; a move-to-front rank is near its floor when nothing of the position is read. Next: T7, levels.
+  - **T7 dropped (2026-11-09):** the levels with more context. A scratch study on G3's file (never proven): no richer
+    context beat T3's; binary choices 0.6% at best, about 0.2% of the file; the coder's seed and step near their best.
+  - **T8 result (h395, h396 supported — pre-registered; h397 after the data): the file takes 106,044 bits (13,256
+    bytes), 0.9726 of T5's 109,034.** User's choice after the position-aware study. `harness/position_walk.py`
+    (strategy_file's walk copied once, strategy_file untouched: a map read again is named by its place among the known
+    maps ranked by board likeness, either way round; each exception flag also under the plies below its leaf),
+    `harness/floor_t8.py`, `scripts/c4_position_walk.py` (43 tests, 53/53 mutants). Dry run on G3's T5 file 188,537 to
+    183,497 (0.973). It reads back to T5's game with 0 differences and all 3,372 leaves won in the run's replay. Only
+    the references (15,775 to 13,331, 15.5% fewer; 14.1% on G3) and the exception flags (14,273 to 13,728, 3.8%; 3.6%)
+    change. 00:03Z–01:59Z. Left: levels 43,495, cell flags 27,995, exception flags 13,728, references 13,331.
+  - **T9 dropped (2026-11-10):** new maps coded under the most alike known map. A scratch study on G3's file (never
+    proven): the cell flags 0.4% fewer, the levels worse; a new map is new because the known ones do not fit.
+  - **T10 dropped (2026-11-10):** the kind flags, moves and exception moves. A scratch study on G3's file (never
+    proven): 968 bits together, 0.5% of the file. The file's code is taken as near its floor; the open steps are in
+    the write-up's §7 (WeakC4 through our coder as a yardstick, earlier leaves, builds priced by the file).
   - **E3 result (h346, h347 supported — pre-registered; h348 after the data): building every winning move beats the
     free pick, 0.61.** All 13 complete; the cheapest move at each of E1's 7 multi-move positions takes 17,484 bits
     against the pick's 28,712. The pick was cheapest only at #115, #130, #145 (where it had moved off the opening's);
@@ -748,6 +791,71 @@ rule standalone and in decision-list order, by ply.
     win at 62 of D1's 4,523 positions — tactics 200, lowest 308; float net 60. A pilot only: D1's 35% fewer misses
     made no smaller heavy tail, so its worth is a build with it as the default — `choose` and the C walk, measured
     code, so not before F3 ends.
+
+- **3.7 Solver-free proving (user, 2026-11-10) — the main line of track R.**
+  - Serves north star 2: a process that needs no solver, so it can run on games that have none.
+  - Yardsticks, graders only: the oracle-assisted file, 106,044 bits; WeakC4's game through our coder, 39,728 bits
+    (scratch, never proven). Getting anywhere near these without a solver is the bar for moving to other games.
+  - **Built 2026-11-10:** `harness/self_proof.py` (17 tests, 39/39 mutants). `failing` walks every line a map plays
+    and charges the positions whose move ends a line unwon, so `harness.steady_local`'s hill-climb scores a map with
+    no oracle (`map_search`). `Prover` proves a position by a map that wins every line, or by a safe move whose every
+    reply is proved; refutes one whose every safe move fails; leaves one the budget cut short as unknown. On
+    tic-tac-toe it proves exactly the 2,836 of 4,520 positions the side to move wins and refutes the rest, graded by
+    a minimax the prover never sees.
+  - **Step 1, pilots (scratch, never proven):**
+    - Pilot 1, done: 144 positions from random play at plies 34 to 14, 30 seconds each. Nothing proved or refuted
+      wrongly; 93 of the 99 won positions proved, 89 of them by a map at the root. Random play is too easy a sample.
+    - Pilot 2, done: 120 leaf positions of G3's oracle-assisted game, by stones and kind, 120 seconds each. All 38
+      the empty map wins were proved; 10 of the 46 where a map with no exceptions exists; 1 of the 36 where G3's map
+      has exceptions. A winning map exists at those 46, so the gap is the search's guide, not the language.
+    - Diagnostic, done: the solver-free search alone, 60 seconds, at 32 such leaves. `bounded_search` (a hill-climb
+      on failing positions whose trial walks stop early) found winning maps at 12, all 8 at 20 and 22 stones, none at
+      8, 12 or 14. The score works given enough tries; the walk is what is slow higher up (15–75 s at 8–14 stones).
+  - **Step 1b, bottom-up proving (user, 2026-11-10):** a `Prover` that searches for a map only where the empty map's
+    walk is under a bound, and otherwise splits into a move whose replies it proves. Pilot 3, done: 13 of 46 proved
+    with no bound and 12 with one (pilot 2: 10), none of the 36 whose G3 map has exceptions. About 25 proving calls
+    fit in 120 seconds; a profile puts 62 of 98 seconds in stepping the game again for each trial walk.
+  - **Remembered replies (user's go, 2026-11-10), done:** 1.1 times as many maps tried at 10–18 stones. Few trials fit,
+    each walks somewhere new, so there is little to remember. The cost is the walk's size: about 100,000 positions
+    for one map at 10 stones, every trial.
+  - **Aimed trials (user's go, 2026-11-10), done:** a trial aims at a position with a choice on a line that failed.
+    On 18 positions, random trials found 7 maps, aimed 5, half aimed 4; aimed trials need far fewer trials where they
+    work but can stall. Inconclusive: timed runs under a load average of about 195 varied 50-fold in trials made.
+    Search methods are compared by trials made from now on, not seconds.
+  - **The wall:** at 10–14 stones one map's walk covers tens of thousands of positions, and no search gets past a
+    few dozen trials. About 100 times short; search tweaks have moved it by at most 2 times.
+  - **Proofs compose (user's choice, 2026-11-10), built:** `harness/composed.py` and `Prover(compose=True)`: every
+    walk stops at positions already proved, so a shallow map only covers what no deeper proof does. Exact on
+    tic-tac-toe, every proof checked independently. Pilot 4: 14 of 46 against 12 without, all 14 checked; within
+    noise, under a load average of about 397 on 10 cores. Comparisons go by work done, not seconds, from now on.
+    Pilot 5, done: with 40 proving calls and 50 trials a search, both arms proved the same 9 of 46, and none of 36.
+    At equal work composition changes nothing yet; the limit is the number of proving calls a tree needs.
+  - **Scaling curve (user's go, 2026-11-10), done:** 40 calls → 9 of 46, 400 → 13, 4,000 → 16 (17 composed); none
+    at 8–12 stones and none of the 36 at any budget. About +3–4 positions a tenfold; brute force will not reach them.
+  - **Prior work, checked 2026-11-10:** the failing-lines score was refuted at ply 10 in October (h166, h170); the
+    only score past ply 10 (leaf size, h172/h174) and the SAT search (h152–h156) used the solver. The open problem
+    is a solver-free score as good as h172's.
+  - **Where the calls go (user's choice, 2026-11-10), done:** at 65 of 66 unproved positions the first root move
+    took 3,999 of 4,000 calls; 160K sub-positions refuted against 109K proved. The search order is the limit.
+  - **Best-first proving (user's choice, 2026-11-11), built:** `harness/best_first.py`, proof-number search with
+    maps as proofs of whole subtrees; exact on tic-tac-toe, every proof checked. Pilot 7 running: 4,000 positions
+    evaluated each on the 82 positions (depth first at the same work: 16, 17 composed). Then: the same search with
+    no maps, to measure how much the maps cut the search.
+  - **Next (proposed, not decided): maps patched by proofs.** Keep a map that fails at only a few positions, and
+    prove the positions on its failing lines where the rule has a choice, each with its own node, so the composed
+    strategy wins. The solver-free form of the exceptions the oracle-assisted builder used.
+  - **Open:** the strategy file cannot encode a composed strategy (a node inside a map's play); needed before any
+    composed result can be compared in bits.
+  - **Step 2:** pre-register and run the measure the pilot points to: coverage of the won positions by ply at a fixed
+    budget, nothing proved wrongly, and the size of what is proved against the oracle-assisted builder on the same
+    positions.
+  - **Step 3:** the net as the guide: it proposes the moves to try, and every proof is an exact label back to it
+    (the real-outcome signal §1 found missing). This is where tracks L and R join.
+  - **Step 4:** rule invention: a grammar of predicates derived from a game's rules, a predicate kept only when the
+    certified description shrinks.
+  - **Step 5:** the same process, unchanged, on the next ladder game (§4).
+  - **Open design questions:** how the budget is shared across a tree; whether proofs are stored bottom-up across
+    positions; what replaces the opening table.
 
 ## 4. The hybrid process — definition of done
 

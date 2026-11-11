@@ -6321,3 +6321,317 @@ bytes, 0.9744 of T3's 115,599, past the 99/100 bar (114,443). It reads back from
 differences, and the run's replay won every line of all 3,372 leaves. 22:41Z–23:38Z. Every part but the cell flags is
 T3's to a tenth of a bit; the flags take 27,995.3 bits against 30,949.4, 9.5% fewer, near the 9.9% the same context
 saved on G3's file in the dry run.
+
+T5 built 2026-11-09, the user's choice after T4: the exception flags coded in context. On G3's T4 dry-run file every
+exception flag was logged (1,895,096 flags, 3,157 of them set, near their zero-order entropy under today's one
+context) and 65 contexts simulated with the coder's counts; today's gives the file's 33,698 exactly. What the position
+offers did little: the level of the rule's move, the safe moves, the stones or the plies below the leaf took it at
+best to 29,314. What the walk had already read did more: how many exceptions so far, up to two, and how many flags
+since the last one on a log scale, 27,285, 19.0% fewer; adding the plies below the leaf to that took it to 26,640 but
+needs the position, which a wrapper does not see, and strategy_file is pinned. `harness/exception_context.py` is a third
+wrapper, under T4's, started afresh at each leaf's `excepted` flag. 20 tests; 35/35 mutants after four gaps closed (a
+symbol of another family inside a walk, and maps that share contexts, without which the maps' and the width's
+wrappers could be dropped unseen). Dry run of `scripts/c4_exception_context.py` on G3's T4 file: 194,950 bits to
+188,537 (0.967), exception flags 27,285, 0 differences.
+
+T5 registered 2026-11-09 (pre-registered h392, the read-back and replay, and h393, 99/100 of 112,644 or less supports
+and 999/1000 refutes), after the proof's path was run on G3's dry-run files (supported).
+
+T5 result 2026-11-09 (h392, h393 supported — pre-registered; h394 after the data). The file takes 109,034 bits, 13,630
+bytes, 0.9680 of T4's 112,644, past the 99/100 bar (111,517). It reads back from its bytes alone to T4's game with 0
+differences, and the run's replay won every line of all 3,372 leaves. 13:23Z–14:07Z. Every part but the exception
+flags is T4's to a tenth of a bit; the exception flags take 14,273.0 bits against 17,883.9, 20.2% fewer, near the
+19.0% the same context saved on G3's file in the dry run.
+
+T6 studied 2026-11-09, the user's choice after T5: the map references coded in context. Scratch only, never proven. On
+G3's T5 dry-run file every reference was logged (5,789 leaves, 1,737 new maps) and today's code reproduced 28,842
+bits exactly. What a wrapper sees did little: the leaf's stones, the widths before or the maps known so far moved the
+widths by 0.3% at best; with the low bits coded adaptively for widths up to two and capped by the maps known, 28,120,
+2.5% fewer. Even the ranks' own static entropy, which no adaptive code reaches, is 27,180. A move-to-front rank is
+near its floor when nothing of the position is read; on Z2's file 2.5% of the references would be about 0.4% of the
+file, under the 99/100 bar, so T6 was not built as it stands.
+
+T7 studied 2026-11-09, the user's choice after T6: the levels with more context. Scratch only, never proven. On G3's
+file (31,067 levels in 1,737 maps; T3's context reproduces 72,644 exactly) none of 27 richer contexts did better:
+the cell's emptiness, the level below, the two cells below, the cell to the left, the levels used so far, the row's
+highest level or the last level coded each made it worse, 72,909 to 75,725, the counts spread too thin. Coding a level
+as binary choices (above the highest so far? then which) did best, 72,183, 0.6% fewer. The coder's own learning is
+near its best too: other seeds, steps or halving of the counts did no better for the levels and 11 bits better for
+the exception flags. On Z2's file 0.6% of the levels would be about 0.2% of the file, so T7 was not built.
+
+Position-aware study 2026-11-09, the user's choice after T7. Scratch only, never proven. G3's T5 dry-run game walked in
+the coder's order, each of its 5,789 leaves logged with the board its map reads. With the known maps ranked by how
+many cells of the leaf's board agree with the best of the boards each map was read at before, either way round (the
+mirrored flag comes after the reference, so the decoder does not know it yet), and the rank coded as today, the
+references take 24,779 bits against move-to-front's 28,842, which the same simulation reproduces exactly: 14.1% fewer.
+Ranking by the safe moves' cells a map levels was far worse (43,507); weighting by age, counting only stones, or
+matching the stone count did no better. With the exception flags also under the plies below the leaf (26,640 against
+27,285 in T5's study), G3's file would take about 4,700 bits fewer, 2.5%. The walk reads the position, which
+strategy_file's pinned walk does not hand a wrapper.
+
+T8 built 2026-11-09, the user's choice after the position-aware study: a new walk, `harness/position_walk.py`,
+strategy_file's walk copied once with two changes, since strategy_file is pinned by T1–T5's claims and a wrapper never
+sees the position. A leaf names a map it reads again by its place among the known maps ranked by likeness (how many
+cells of its board agree with the best of the boards each map was read at, either way round, ties in move-to-front
+order); each exception flag is coded under T5's context and the plies below its leaf on a log scale (26,306 on G3's
+file against 27,285, better than a cap on the plies). The maps keep T3's and T4's wrappers. Every other call is the T5
+coder's own, which a test checks call by call on seven fixtures. 43 tests; 53/53 mutants, after one equivalent mutant
+was dropped: viewing every board from the other side changes no count of agreeing cells, since every leaf has the same
+side to move. Dry run of `scripts/c4_position_walk.py` on G3's T5 file: 188,537 bits to 183,497 (0.973), references
+24,779 and exception flags 26,306 as the study found, 0 differences.
+
+T8 registered 2026-11-10 (pre-registered h395, the read-back and replay, and h396, 99/100 of 109,034 or less supports
+and 999/1000 refutes), after the proof's path was run on G3's dry-run files (supported).
+
+T8 result 2026-11-10 (h395, h396 supported — pre-registered; h397 after the data). The file takes 106,044 bits, 13,256
+bytes, 0.9726 of T5's 109,034, past the 99/100 bar (107,943). It reads back from its bytes alone to T5's game with 0
+differences, and the run's replay won every line of all 3,372 leaves. 00:03Z–01:59Z; the decoder ranks the maps
+against every board read before, so writing and reading back took 51 minutes against T5's 14. Every part but the
+references and the exception flags is T5's to a tenth of a bit; the references take 13,331.0 bits against 15,775.1,
+15.5% fewer, and the exception flags 13,728.2 against 14,273.0, 3.8% fewer, near the 14.1% and 3.6% the same walk saved
+on G3's file in the dry run.
+
+T9 studied 2026-11-10, the user's choice after T8: each new map coded under what the most alike known map says for
+the cell. Scratch only, never proven. On G3's file each of the 1,737 new maps was given the map read at the earlier
+leaf whose board agrees best with its first leaf's, either way round and mirrored to match; T4's and T3's contexts
+reproduce 46,828 and 72,644 bits exactly. Of the empty cells, 71% of those the reference levels are levelled in the
+new map against 44% of the others, but T4's context already holds most of that: with the reference's say the flags
+take 46,629, 0.4% fewer. Where both level a cell the levels agree 27% of the time, and every level context with the
+reference's level did worse (73,533 to 76,064). The map coded just before did no better. A new map is new because the
+known ones do not fit, so T9 was not built.
+
+T10 studied 2026-11-10, the user's choice after T9: the small parts, the kind flags, the moves and the exception moves.
+Scratch only, never proven. G3's game walked in the coder's order with what a decoder knows at each call; today's
+codes reproduce the file's 3,924, 2,872 and 4,863 bits exactly. The kind flag also under whether the position has a
+winning move takes 3,435 (the safe moves did nothing); the moves ranked by how lately each column was played 2,743;
+the exception moves coded adaptively instead of uniformly 4,513, and ordering them by the map's levels was worse.
+Together 968 bits, 0.5% of G3's 183,497, under the 99/100 bar, so T10 was not built. With T6, T7 and T9 this leaves
+no part of the file whose code a studied context shrinks by 1% of the file.
+
+The write-up was restructured the same day: the result's steps as a table, the scratch studies in their own table
+under the dead ends, §6 renamed to what it holds, and a new §7 of what is open, none of it measured.
+
+WeakC4 through our coder, 2026-11-10 (an agent's scratch study, never proven; a yardstick only). WeakC4's whole game
+written by harness.position_walk under its own reading (ties "exact", no last level, ten levels) is one file of 39,728
+bits against our 106,044; it decodes with 0 differences and its replay wins all 1,180 leaves. Y1's count for the same
+game was 123,881: the count priced a mirrored use as a second map and 4 bits a level on every empty cell. Of the
+66,316-bit gap, the maps are 57% (33,904 against 71,490: 385 maps against 1,008, though WeakC4 pays more a map, 88 bits
+against 71), the exceptions 25% (45 exceptions against 1,625), the references and readings 15%, the tree's own bits
+4%. Under our file's rule (ties "lowest", unlevelled last) the same diagrams cannot be written: for 247 of 385 the
+orders the rule would need contradict each other. So the comparison is between two rule settings as well as two trees,
+both of which our Facts already has. The checkout of WeakC4 (GPL-3) stayed in scratch; nothing of it is in the repo.
+
+Stance restated by the user, 2026-11-10: the process must not rely on a solver for the game. The certified file was
+found with one (the opening table, the builder's winning moves and the local search's score all read harness.c4_oracle
+and c4solver.c); only the rule language and the verifying walk are solver-free. The result stands as oracle-assisted:
+what the representation can hold, not what a solver-free process can find.
+
+Solver-free proving, 2026-11-10 (plan §3.7). `harness/self_proof.py` built: `failing`, a walk with the contract of
+steady_exceptions.needed and no oracle, which charges each of the side's positions whose move by the map ends a line
+unwon; `map_search`, steady_local's hill-climb scored by it; and `Prover`, which proves a position by a map that wins
+every line or by a safe move whose every reply is proved, refutes one whose every safe move fails, and leaves one its
+budget cut short unknown. 17 tests, 39/39 mutants after three gaps closed (a position the map gives no move, a proved
+position asked twice, the search's start) and one piece of unneeded code removed (restricting a covering map to the
+empty cells changes no move). On tic-tac-toe it proves exactly the 2,836 of the 4,520 non-terminal positions the
+side to move wins and refutes the other 1,684; the grader is a minimax in the test. A scratch pilot on Connect-4 was
+launched: 24 positions from random play at each of plies 34, 30, 26, 22, 18 and 14, 30 seconds a position with a
+1-second map search, the solver grading only after the prover has finished.
+
+Three rules added to the plan the same day: a solver is a yardstick and never a means; each step is checked against
+the north star before it is taken; plans, findings and decisions are recorded in this repo as they happen. The WeakC4
+measurement and the file-priced study were side steps by the second rule.
+
+Solver-free pilot 1, 2026-11-10 (scratch, never proven; plan §3.7 step 1). 144 Connect-4 positions from random play, 24
+at each of plies 34, 30, 26, 22, 18 and 14, 30 seconds a position, the solver grading afterwards. Nothing was proved
+or refuted wrongly. Of the 99 positions won for the side to move, 93 were proved (14/14, 19/19, 17/17, 16/17, 15/15,
+12/17 from ply 34 down); of the 45 not won, 23 were refuted and 22 left unknown, the unknown share rising from none at
+ply 34 to 6 of 7 at ply 14. But the sample is easy: 89 of the 93 were proved by a map at the root, mostly the empty
+map, because random play hands the mover positions it wins at once. It shows the prover is sound and cheap on easy
+positions and says little about the positions a whole strategy must prove. Pilot 2 was launched on those: about 110
+of the leaf positions of G3's oracle-assisted game, 6 for each count of stones (6 to 22) and kind (the empty map
+won it, a map did, a map with exceptions did), 120 seconds each with a 10-second map search. The solver's game chooses
+the sample; the prover is given only the position.
+
+Solver-free pilot 2, 2026-11-10 (scratch, never proven; plan §3.7 step 1). 120 leaf positions of G3's oracle-assisted
+game, up to 6 for each count of stones and kind, 120 seconds each with a 10-second map search; every one is won for
+the side to move. Nothing was refuted. All 38 the empty map wins were proved at once. Of the 46 where G3 holds a map
+with no exceptions, 10 were proved (none of 18 at 8 to 12 stones; 1 of 6 at 14, 1 at 16, 2 at 18, 3 at 20, 3 of 4 at
+22). Of the 36 where G3's map carries exceptions, 1. The rest ran out of budget after a median 23 proving calls. At
+those 46 a map that wins every line exists and the verifying walk accepts it, so the gap is the search, not the
+language: the oracle-assisted build had the solver's exceptions to score a map by, a C walk, and a library of maps
+found at other positions; the prover here has a count of failing positions, a Python walk and no library. A
+diagnostic was launched to separate these: the solver-free search alone for 60 seconds at such leaves, recording the
+maps it tries, the failing positions of its best map, of the empty map and of G3's own map, and the size of the walk.
+
+Solver-free search diagnostic, 2026-11-10 (scratch, never proven; plan §3.7 step 1). At 32 leaf positions of G3's
+game where a map with no exceptions is known (4 for each count of stones from 8 to 22), the solver-free search alone
+for 60 seconds. steady_local's hill-climb scored by `failing` found a winning map at 5. A simpler hill-climb on the
+count of failing positions alone, whose trial walks stop once they fail more than the map in hand
+(`self_proof.bounded_search`, 23 tests), found 12: 4 of 4 at 20 and 22 stones, 2 of 4 at 18, 1 at 16, 1 at 10, none at
+8, 12 or 14. The score is enough where the search gets hundreds of tries. What stops it higher up is the walk: one
+walk of a map over every line takes 15 to 75 seconds at 8 to 14 stones, so the search tries 2 to 160 maps in a
+minute, and at two 8-stone positions the first walk did not fit the 200,000-position cap. So the next step is
+bottom-up proving: search for a map only where its walk is small, and split a larger position into a move whose
+replies are proved deeper.
+
+Bottom-up proving built, 2026-11-10 (plan §3.7 step 1b, the user's go). `Prover` takes `search_below`: it searches for
+a map only where the empty map's walk covers at most that many of the side's positions (a `failing` walk capped at
+the bound), and otherwise goes straight to splitting into a move. Maps already held are still tried everywhere. 25
+tests. Pilot 3 launched on pilot 2's 82 positions the empty map does not win, with `bounded_search` in both arms, 120
+seconds each with 10-second searches: no bound, and a bound of 5,000 positions, about the largest walk at which the
+diagnostic's searches found maps. `harness/self_proof.py` now has 25 tests and 57/57 mutants killed, after two gaps in the bounded
+search were closed (clearing a cell, and a trial that changes nothing).
+
+Solver-free pilot 3, 2026-11-10 (scratch, never proven; plan §3.7 step 1b). Pilot 2's 82 positions the empty map does
+not win, 120 seconds each with 10-second searches, `bounded_search` in both arms. Where G3 holds a map with no
+exceptions: 13 of 46 proved with no bound, 12 of 46 with a bound of 5,000 positions, against pilot 2's 10. Where G3's
+map carries exceptions: none in either arm (pilot 2: 1). Nothing refuted. Both arms made a median 21 to 26 proving
+calls in the 120 seconds, so the bound changed little: a split position must prove every reply of its move, and each
+reply costs a search too. A profile of one 12-stone position over 90 seconds: 84 of 98 seconds in 13 searches of 10
+seconds each, 5 of which found a map; inside them 2.9 million Connect-4 moves took 62 seconds and the rule's facts 40.
+The hill-climb walks nearly the same lines on every trial, so the cost is re-stepping the game, not the score.
+
+Remembered replies, 2026-11-10 (scratch measurement, never proven; plan §3.7). `self_proof.Replies` remembers, for each
+of the side's positions and moves, the positions that follow, since they do not depend on the map; `failing` and
+`bounded_search` share it across trials and searches (33 tests). At 10 Connect-4 positions of 10 to 18 stones, 30
+seconds of search each, the same seeds: 294 maps tried with it against 269 without, 1.1 times. At three positions
+the first walk did not finish in 30 seconds either way; only one 18-stone position gained much (47 to 69). At 10 to 16
+stones a search makes 2 to 13 trials, each sends the walk somewhere new, and there is little to remember. The cost is
+the walk's size: proving a 10-stone position with one map walks about 100,000 of the side's positions, about 0.3 ms
+each in Python, for every trial. The memory stays (it is never slower), but it is not the lever.
+
+Builds priced by the file, 2026-11-10 (an agent's scratch study, never proven; a side step by the plan's north-star
+rule, since it improves the oracle-assisted builder). The local search's score was swapped for the file's prices
+(static prices from T8's final coder counts, within 5% of the real parts; exceptions by a closed form fitted on the
+file's 129 excepted leaves) and rerun on a sample of T8's leaves with the solver's walk. At the 16 leaves where every
+arm ended with no exceptions, the file-priced maps took 0.967 of the count-priced maps' bits with today's stopping
+rule and 0.868 when the search goes on past its first clean leaf; on the heavy and excepted leaves it was
+inconclusive (0.89, interval 0.63 to 1.20). Sharing across leaves could not be measured and could cancel it. A proper
+test would cost about 50 CPU-hours for 8 roots. Not taken up: the plan's main line is §3.7. The scripts and results
+are in the session's scratch folder file_priced/.
+
+Aimed trials built, 2026-11-10 (plan §3.7, the user's choice). The charged positions turned out to be mostly forced
+endings, a single move that draws; the map's mistake was earlier on the line. So `failing` can trace the line to each
+charged position (`trace`), and `aimed_trial` picks a charged position, one of the side's positions on its line where
+the rule has a choice, and one of the other moves there, and gives that move's cell a level below the one that
+decides there (or, where that is already the first level, moves the map's own move's cell up one). `aimed_search` is
+`bounded_search` with these trials, a random cell's level changed only where no position on the line has a choice;
+the two now share one climbing loop. 44 tests. Measured next: aimed against random trials, 18 positions of 10 to 20
+stones, 60 seconds each, the same seeds.
+
+Aimed against random trials, 2026-11-10 (scratch, never proven). 18 leaf positions of G3's game with a known map and
+no exceptions, 3 at each of 10, 12, 14, 16, 18 and 20 stones, 60 seconds each, the same seeds. Random trials found a
+winning map at 7, aimed trials at 5; where both did, aimed trials needed 4 to 10 times fewer (249 against 2,423, 45
+against 200, 29 against 55, 14 against 54). But aimed trials can stall: at one 20-stone position they ran 10,792
+trials and stopped at 46 failing positions, where random trials found a map in 616. At 10 to 14 stones neither got
+past 2 to 65 trials in the minute. A search with half its trials aimed (`share`, 47 tests) was run next on the same
+positions.
+
+Half-aimed trials, and a confound, 2026-11-10 (scratch, never proven). The same 18 positions with half the trials
+aimed found winning maps at 4 (random 7, aimed 5); failing positions left where all three finished: 30,573 random,
+39,842 aimed, 39,882 half. None of the three is better on this sample. The machine's load average was about 195 on 10
+cores through these runs (other work), and the number of trials a timed search made at the same position varied
+from 14 to 760 between runs, so timed comparisons on 18 positions cannot separate the searches. Further comparisons
+of search methods should count trials, not seconds. What is not in doubt: at 10 to 14 stones each trial walks tens
+of thousands of positions, and no search gets past a few dozen trials there; that is about 100 times short.
+
+Proofs compose, built 2026-11-10 (plan §3.7, the user's choice). `harness/composed.py` (9 tests): a composed strategy
+is strategy_file's nodes and maps where a leaf's map plays only until the game reaches one of the side's positions
+with a node of its own, which then decides; `check` plays every line with no solver and nothing from the prover. In
+`self_proof`, `failing` takes `stop` (positions already proved, never the root) and does not walk past them; with
+`compose`, the `Prover`'s searches, its checks of a map, its simplification and its bound all walk that way, and
+`strategy` exports the composed strategy, every proved position the play reaches. On tic-tac-toe the composing prover
+proves exactly the 2,836 won positions and refutes the 1,684 others, and `check` accepts every exported strategy. At
+X{8} O{7} the map {4: 0} plays the winning move but loses later; with the four positions after it proved, the
+composing prover takes that map as the leaf, where the plain one needs a move node. 51 tests in self_proof. The
+strategy file cannot write a composed strategy yet: its decoder would have to know that a node can sit inside a
+map's play. Pilot 4 launched: pilot 3's positions and settings with composition on, every proof checked.
+
+Solver-free pilot 4, 2026-11-10 (scratch, never proven). Pilot 3's 82 positions and settings (120 seconds, 10-second
+searches, bound 5,000) with composition on: 14 of the 46 with a known map proved, against 12 without composition, and
+`composed.check` accepted all 14; none of the 36 whose G3 map has exceptions. A median of 12 to 15 positions proved
+per 120 seconds. The difference is within noise. The machine's load average rose from about 195 to about 397 on 10
+cores during the run (other work), so each of the four workers had a small share of a core and a timed budget
+bought far less work than the same budget would unloaded. Until the load falls, comparisons must be by work done (a
+fixed number of proving calls and trials per position), not by seconds.
+
+Mutation round, 2026-11-10. `harness/self_proof.py` 90/90 mutants and `harness/composed.py` 10/10, after ten gaps
+were closed with new tests: simplifying by the composed walk; every walk of a composing prover (searches, bound,
+checks) passed its proofs; an aimed trial never aimed at a position with a win now; the export followed through a
+position it had not proved to one it had; and, for the checker, a leaf below handing play to its own map, a map
+stopping at a move node, and a position two maps reach played by each. The last three use explicit policies in
+place of the rule, from a minimax in the test, so they test the checker's own logic; tic-tac-toe's forced lines gave
+no real maps that separate them. 56 prover and 14 checker tests.
+
+Solver-free pilot 5 launched, 2026-11-10 (the user's go). Pilot 4's 82 positions and bound with a fixed amount of
+work in place of a time budget, the same in both arms: 40 proving calls a position, 50 trials a map search, without
+and with composition. A 900-second ceiling a position is a safeguard; positions that reach it are reported and left
+out of the comparison.
+
+Solver-free pilot 5, 2026-11-10 (scratch, never proven). Pilot 4's 82 positions with fixed work, 40 proving calls a
+position and 50 trials a search, without and with composition; no position reached the ceiling. Both arms proved
+the same 9 of the 46 with a known map (0 of 6 at 8 stones, 1 at 10, 0 at 12, 1 at 14, 16 and 18, 2 at 20, 3 of 4 at
+22) and none of the 36 whose G3 map has exceptions; every composed proof checked; nothing refuted. Sub-positions
+proved over all 82: 1,601 without and 1,618 with composition. A position took a median 6 to 7 seconds. So at this
+work composition makes no difference, and the limit is the number of proving calls: the proof tree under a 10- to
+14-stone position needs far more than 40, and the 120-second runs made only about 25 because each search ran for 10
+seconds. The next measure is how the proved share grows with the calls allowed.
+
+Scaling curve launched, 2026-11-10 (the user's go): pilot 5's positions and settings at 400 proving calls a position,
+without and with composition, a ceiling of 3,600 seconds a position as a safeguard.
+
+Scaling curve at 400 calls, 2026-11-10 (scratch, never proven). Pilot 5's 82 positions at 400 proving calls each
+(10 times pilot 5), 50 trials a search; no position reached the ceiling. Without and with composition alike: 13 of the
+46 with a known map proved (0, 1, 0, 2, 1, 1, 5, 3 at 8 to 22 stones), against 9 at 40 calls; none of the 36 whose G3
+map has exceptions; nothing refuted; every composed proof checked. Sub-positions proved over all 82: 11,778 without,
+11,864 with composition, about seven times as many as at 40 calls. A position took a median 7 to 8 seconds: it used
+up its calls, not its time. Ten times the work proved four more positions, none at 8 to 12 stones. The run at 4,000
+calls was launched next, as the plan said if the share grew.
+
+Scaling curve at 4,000 calls, 2026-11-10 (scratch, never proven). Pilot 5's 82 positions at 4,000 proving calls each;
+no position reached the ceiling; median 33 to 35 seconds, longest 137. Without composition 16 of the 46 with a known
+map proved, with composition 17 (one more 14-stone position, a composed proof of 283 nodes that `composed.check`
+accepts); by stones 0, 1, 0, 2 or 3, 1, 2, 6, 4 at 8 to 22. None of the 36 whose G3 map has exceptions, at any
+budget. Nothing refuted or proved wrongly. Sub-positions proved: about 109,000 in each arm. Across 40, 400 and 4,000
+calls the proved share went 9, 13, 16 or 17: about three or four more positions for each tenfold work, and nothing
+at 8 to 12 stones over a hundredfold range. Proving every line of a map, or composing over proofs already made,
+does not reach these positions. The oracle-assisted builder kept maps that were almost right and patched them with
+the solver's moves; the solver-free counterpart is to keep such a map and prove the few positions where it goes
+wrong, each with a node of its own, which composition already lets take over from the map.
+
+Checked against the record, 2026-11-10 (the user asked). The §3.7 work should have started from it. Local search
+scored by the lines a map fails, the score `failing` gives, was registered and refuted in October: 0 of 8 at ply 10
+in 30 minutes (h166); h170 found why: that score charged a position the map gave no move once and walked no further,
+so the empty map looked best. The fix that got past ply 10, scoring a map by its leaf's size (h172, h174: 4 of 8 pure
+maps), needed the solver's moves for the exceptions, as did the SAT search (h152-h156: nothing at ply 10, 19% at 12,
+50% at 14) and its larger budgets (h162, h163). So the wall the pilots met at 8 to 12 stones is h166's, and the only
+score that crossed it used a solver. h170's flaw does not carry over: under the rule now used (ties lowest, unlevelled
+a last level) the empty map gives a move wherever any move is safe. New since then: the bottom-up prover, exact on
+tic-tac-toe; composition with an independent checker; the fixed-work scaling curve; and that the limit is the
+number of proving calls. The open problem is a solver-free score as good as h172's.
+
+Where the proving calls go, 2026-11-10 (scratch, never proven; the user's choice). Pilot 5's 82 positions at 4,000
+proving calls each, recorded by a watching subclass of the Prover. 16 proved, 66 unknown, none refuted. At 65 of the
+66 unknown, the first move tried at the root took 3,999 of the 4,000 calls and came back unknown; the other six root
+moves got none. Over all 82: 159,813 sub-positions refuted against 109,195 proved, and of the 1,942 proved under the
+16 proved roots, 383 are in their proofs. Of 3,002 maps found, most were at 24 to 34 stones (610 at 28) and 6 at 14.
+So depth-first proving sinks the whole budget into its first choice and spends more on refuting than on proving;
+the order of the search, not only its score, is what stops it. The register has no claim on proof-number or other
+best-first proving (searched for the terms).
+
+Best-first proving built, 2026-11-11 (plan §3.7, the user's choice). `harness/best_first.py`: proof-number search over
+the game tree, the side's positions as OR nodes, each safe move as an AND node over the side's next positions; each
+step expands the unknown position reached by choosing the child with the smallest proof number at an OR node and the
+smallest disproof number at an AND node. A new position goes first to the `Prover`'s leaf step (maps where the walk
+is small, the empty map everywhere), and positions proved by a move are stored with the Prover's, so with
+composition the maps' walks stop at them. The budget is positions evaluated, the Prover's unit. On tic-tac-toe it
+proves every position exactly when its side wins and disproves the rest, with and without composition, and every
+proof checks (`composed.check`, or strategy_file's replay). 10 tests. Pilot 7 launched: pilot 5's 82 positions, 4,000
+positions evaluated each, composition on, every proof checked; the depth-first Prover's figure at the same work is
+16 plain, 17 composed.
+
+Best-first, maps off and mutation round, 2026-11-11. `BestFirst(maps=False)` is plain proof-number search, every
+position proved by a move, the measure of what the maps save; it is exact on tic-tac-toe too, with and without
+composition, and on the 5-expansion fixture X{6} O{3} it needs more expansions than with maps. 15 tests; 29/29
+mutants after three gaps were closed (the empty map on a position over the bound, its proof stored, and a move that
+wins at once, which the leaf step always caught first when maps were on).

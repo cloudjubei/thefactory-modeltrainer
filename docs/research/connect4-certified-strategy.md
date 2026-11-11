@@ -1,37 +1,49 @@
-# A certified first-player strategy for Connect-4 in 112,644 bits
+# A certified first-player strategy for Connect-4 in 106,044 bits
 
-Write-up, 2026-10-29, updated 2026-11-09 (T4). Question: how small can a complete, certified description of a winning first-player strategy for
-Connect-4 (7×6) be, if a generic process finds it? Each claim cited as hNNN is a registered claim in
+Write-up, 2026-10-29, updated 2026-11-10 (T8). Question: how small can a complete, certified description of a winning
+first-player strategy for Connect-4 (7×6) be, if a generic process finds it? Each claim cited as hNNN is a registered claim in
 `examples/boardgames/hypotheses.json`, with its proof test and evidence file. A claim marked *after the data* was written
 once the run had finished; every other headline claim was registered before its run started, except h373, which was
 registered while X4 ran: X4's rows were unfinished and U2's search had never been run, but the register counts it as after
 the data.
 
+**How to read this result.** The strategy was found with an exact Connect-4 solver in the search: the opening table,
+the builder's winning moves and the local search's score all read it. Only the rule language and the checks that the
+strategy wins are solver-free. So this is what the representation can hold when the winning moves are known, not what a
+process without a solver can find. The project's aim is the second, with a solver used only to grade (§7).
+
 ---
 
 ## 1. Result
 
-1. **A certified winning strategy for the first player, from the empty board, in one file of 112,644 bits (14,081 bytes)**
-   (T4; h389, h390, h391). The file reads back from its bytes alone to exactly the strategy written, and that strategy,
+1. **A certified winning strategy for the first player, from the empty board, in one file of 106,044 bits (13,256 bytes)**
+   (T8; h395, h396, h397). The file reads back from its bytes alone to exactly the strategy written, and that strategy,
    played by the run against every reply, wins all 3,372 leaves' lines. The decoder is given the game's rules, the map
-   rule's settings and the board's mirror; none of those, nor the decoder itself, is in the 112,644. By part:
+   rule's settings and the board's mirror; none of those, nor the decoder itself, is in the 106,044. By part:
 
-   | Part | Bits | Share | T3's file | T2's file | T1's file | In the count |
-   |---|---|---|---|---|---|---|
-   | 1,008 maps: which of the cells hold a level (27,995) and the levels of their 18,444 cells (43,495) | 71,491 | 63.5% | 74,445 | 77,045 | 89,289 | 99,613 |
-   | 1,625 exceptions on 129 leaves | 21,054 | 18.7% | 21,054 | 21,054 | 21,051 | 21,815 |
-   | The tree: 4,052 positions, 680 moves, 3,372 leaves, their references and readings | 20,099 | 17.8% | 20,099 | 20,099 | 19,663 | 41,324 |
-   | The coder's ending and rounding | 0 | | 1 | -1 | 2 | |
-   | **Total** | **112,644** | | **115,599** | **118,197** | **130,005** | **162,752** |
+   | Part | Bits | Share | In T1's file | In the count |
+   |---|---|---|---|---|
+   | 1,008 maps: which cells hold a level (27,995) and the levels of their 18,444 cells (43,495) | 71,491 | 67.4% | 89,289 | 99,613 |
+   | 1,625 exceptions on 129 leaves: their flags (13,728), moves (2,478) and which leaves have any (692) | 16,898 | 15.9% | 21,051 | 21,815 |
+   | The tree: 4,052 positions, 680 moves, 3,372 leaves, their references (13,331) and readings | 17,655 | 16.6% | 19,663 | 41,324 |
+   | The coder's ending and rounding | 0 | | 2 | |
+   | **Total** | **106,044** | | **130,005** | **162,752** |
 
-   The file is the whole game below, which every earlier size in this write-up counted rather than wrote. T1 wrote it as
-   it was built, 0.7988 of the count, with 21,661 of the 32,747 bits saved in the tree (h382, after the data). T2 then
-   gave each map the lowest levels that make the same moves, and merged maps that agree, built so that every move is T1's;
-   the file is 0.9092 of T1's, the levels giving 11,519 of the 11,808 bits saved (h385, after the data). T3 then coded
-   each level under what the decoder has read of its map, 5.6% fewer bits for the levels and nothing else changed:
-   0.9780 of T2's (h388, after the data). T4 coded each cell's flag under what the map has said of the two cells
-   below it as well, 9.5% fewer bits for the flags and nothing else changed: 0.9744 of T3's (h391, after the data).
-   What the count pays and leaves out is in §2.
+   The file is the whole game below, which every earlier size in this write-up counted rather than wrote. Six steps
+   took the count to this file. None built anything new, each was registered before its file existed, and each file
+   reads back to the game of the step before:
+
+   | Step | What changed | File (bits) | Of the step before | Where the saving was (after the data) |
+   |---|---|---|---|---|
+   | T1 | The game written as one file, as it was built | 130,005 | 0.7988 (of the count) | The tree: 21,661 of the 32,747 bits saved (h382) |
+   | T2 | Each map given the lowest levels that make the same moves; maps that agree merged | 118,197 | 0.9092 | The levels: 11,519 of the 11,808 bits saved (h385) |
+   | T3 | Each level coded under what the decoder has read of its map | 115,599 | 0.9780 | The levels only, 5.6% fewer (h388) |
+   | T4 | Each cell's flag also coded under what the map said of the two cells below | 112,644 | 0.9744 | The cell flags only, 9.5% fewer (h391) |
+   | T5 | Each exception flag coded under the exceptions its leaf's walk has read | 109,034 | 0.9680 | The exception flags only, 20.2% fewer (h394) |
+   | T8 | The position read too: references ranked by board likeness, exception flags by depth | 106,044 | 0.9726 | The references, 15.5% fewer, and the exception flags, 3.8% (h397) |
+
+   The file is 0.652 of the count and 0.816 of T1's file. Four more coding ideas (T6, T7, T9, T10) were studied in
+   scratch, found under 1% of the file each and were not built (§5). What the count pays and leaves out is in §2.
 
    The game is G3's whole game (280,640 bits; h324, h326) with 50 of its 148 ply-6 subtrees replaced
    by strategies built from ply 6 (E1, O1, E3, V1, V2; §6), 76 of the 416 ply-8 strategies rebuilt from every
@@ -64,11 +76,11 @@ the data.
 
    | Description | Bits | vs this result |
    |---|---|---|
-   | The repo's policy net (not certified) | ~660,000 | 5.9x larger |
-   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.3x smaller |
-   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 2.5–3.2x smaller |
+   | The repo's policy net (not certified) | ~660,000 | 6.2x larger |
+   | WeakC4, as shipped ([2swap](https://2swap.github.io/WeakC4/explanation/)) | ≈ 90,000 | 1.2x smaller |
+   | WeakC4, its diagrams entropy-coded | ≈ 35,000–45,000 | 2.4–3.0x smaller |
 
-   WeakC4 uses a Connect-4-specific language (see §6, option 4). Every rule here is generic: nothing in it knows about
+   WeakC4 uses a Connect-4-specific language (see §6, Y1). Every rule here is generic: nothing in it knows about
    gravity, columns or threats beyond "a move that wins now" and "a move that lets the opponent win now". The mirror a
    leaf may read (§2) is a symmetry found by checking sampled play, not assumed.
 4. **The heavy tail sets the size.** The median frontier position takes 18 bits. The heaviest 10% (67 positions) hold
@@ -77,18 +89,8 @@ the data.
 The evidence for G3 is `examples/boardgames/evidence/c49_g3.json.gz`, and `harness/floor_g3.py` (`g3_size`)
 recomputes its total from it. The assembled game is recomputed by `tests/test_c49_z2_evidence.py`
 (`harness/floor_z2.py`: U2's local search over every certified piece, from U2's game and from every position's smallest
-piece) from G3 and the E1, O1, E3, V1, V2, G4, Z1, X2, X3, X4 and Z2 evidence files. The file is in
-`examples/boardgames/evidence/c49_t1.json.gz`, written and played by `scripts/c4_strategy_file.py`.
-`tests/test_c49_t1_evidence.py` decodes it from its bytes, assembles the game again, compares the two and encodes the game
-back to the same bytes; the replay of every line is the run's, recorded in that file. T2's file is
-`examples/boardgames/evidence/c49_t2.json.gz`, written and played by `scripts/c4_map_orders.py`;
-`tests/test_c49_t2_evidence.py` decodes T1's file, rebuilds the maps from the orders stored in T2's, encodes the game to
-the same bytes and decodes them back to it. T3's file is `examples/boardgames/evidence/c49_t3.json.gz`, written and
-played by `scripts/c4_level_context.py`; `tests/test_c49_t3_evidence.py` decodes T2's file, writes its game with
-`harness/level_context.py` to the same bytes and decodes them back to T2's game. T4's file is
-`examples/boardgames/evidence/c49_t4.json.gz`, written and played by `scripts/c4_cell_context.py`;
-`tests/test_c49_t4_evidence.py` decodes T3's file, writes its game with `harness/cell_context.py` to the same bytes and
-decodes them back to T3's game.
+piece) from G3 and the E1, O1, E3, V1, V2, G4, Z1, X2, X3, X4 and Z2 evidence files. Each file's evidence,
+script and proof test are listed under Reproduction.
 
 ---
 
@@ -130,15 +132,24 @@ assembled game never states, and the count pays nothing for telling a piece from
 saying which list a piece's references point into. T1 writes the game instead (`harness/strategy_file.py`,
 `harness/arithmetic_coding.py`): one walk from the empty board, in the same order for writing and reading, with adaptive
 arithmetic coding that uses only what a decoder knows at that point. A position reached by two pieces is written once,
-and each map is trimmed to the cells empty at some leaf that plays it, since a leaf reads no other cell. T2
-(`harness/map_orders.py`) then rewrites the maps: a map matters only by the order it puts the safe moves' cells in where
-the rule has a choice, so each map gets the lowest levels that keep that order at every position its leaves reach, and
-maps that agree are merged. The searches that found the maps keep any levels that work, spread over all 8; the lowest
-levels crowd the bottom and take fewer bits. T3 (`harness/level_context.py`) codes each level under what the
-decoder has already read of its map: the highest level so far, the cell's row and whether the cell below holds a level.
-The row and the cell below come from the board's shape, which the mirror already uses; nothing in it is about how
-Connect-4 is played. T4 (`harness/cell_context.py`) codes each cell's flag under the cell, whether it is empty where
-the map is first read, and for the two cells below it whether each is empty and holds a level, from the same shape.
+and each map is trimmed to the cells empty at some leaf that plays it, since a leaf reads no other cell. Five more
+steps change only how that game is written:
+- **T2, lowest levels** (`harness/map_orders.py`). A map matters only by the order it puts the safe moves' cells in
+  where the rule has a choice. Each map gets the lowest levels that keep that order at every position its leaves reach,
+  and maps that agree are merged. The searches that found the maps keep any levels that work, spread over all 8; the
+  lowest levels crowd the bottom and take fewer bits.
+- **T3, levels in context** (`harness/level_context.py`). Each level is coded under what the decoder has already read
+  of its map: the highest level so far, the cell's row and whether the cell below holds a level. The row and the cell
+  below come from the board's shape, which the mirror already uses; nothing in it is about how Connect-4 is played.
+- **T4, cell flags in context** (`harness/cell_context.py`). Each cell's flag is coded under the cell, whether it is
+  empty where the map is first read, and for the two cells below it whether each is empty and holds a level.
+- **T5, exception flags in context** (`harness/exception_context.py`). Each exception flag is coded under how many
+  exceptions the leaf's walk has read so far, up to two, and how many flags since the last one, on a log scale. It reads
+  nothing of the board.
+- **T8, the position read** (`harness/position_walk.py`). This is strategy_file's walk copied once, with two things
+  read from the board. A map read again is named by its place among the known maps, ranked by how many cells of the
+  leaf's board agree with the best of the boards each was read at, either way round, ties in move-to-front order. Each
+  exception flag is also coded under the plies below its leaf, on a log scale.
 
 **Certification.** Every leaf's map is verified over every continuation by a solver-free walk, then certified a
 second time independently. `check` re-walks the whole strategy against every reply with no oracle, and the oracle
@@ -167,7 +178,8 @@ After a build is complete, two **improvement** passes run while time remains:
 needs on every line. Before that change, the search scored a map by its first failing line, and found nothing at
 ply 10.
 
-**The whole game** was built three times:
+**Every whole game, in order.** F1 to G3 are whole-game runs. J1 to Z2 assemble the game from certified pieces. T1 to
+T8 write Z2's game as a file:
 
 | Run | What changed | Whole game (bits) | Ratio to the previous run | Claims |
 |---|---|---|---|---|
@@ -190,6 +202,8 @@ ply 10.
 | T2 | No new builds: T1's file with each map given the lowest levels that keep its moves, maps that agree merged | 118,197 (file) | 0.909 | h383–h385 |
 | T3 | No new builds: T2's game written again, each level coded under what its map has said so far | 115,599 (file) | 0.978 | h386–h388 |
 | T4 | No new builds: T3's game written again, each cell flag also coded under the two cells below it | 112,644 (file) | 0.974 | h389–h391 |
+| T5 | No new builds: T4's game written again, each exception flag coded under the exceptions its walk has read | 109,034 (file) | 0.968 | h392–h394 |
+| T8 | No new builds: T5's game written again, references ranked by board likeness, exception flags by depth too | 106,044 (file) | 0.973 | h395–h397 |
 
 The whole-game passes stop at G3 by a rule set before it ran: pass again only while a pass gains a tenth. G4 and Z1 are
 library passes over the assembled game instead, each judged against its own 97/100 bar: G4 cleared it, Z1 fell short.
@@ -244,6 +258,17 @@ if new.
 | Exception flags split by context, or moves coded tactics first | 11% larger; 1.9% | h315, h316 |
 | Ties broken by a 19,996-bit learned net | Larger than tactics: 68,693 against 55,809 bits on 28 positions | h317, h327–h329 |
 
+**Studied in scratch and not built.** These were never registered or proven. Each figure is a simulation of the coder
+on G3's file, or for P1 a stand-in for the file's cost.
+
+| Studied | Outcome |
+|---|---|
+| P1: pieces picked by their file cost instead of the count | U2's search moved 18 of 819 positions; the gain was inside the stand-in's own error |
+| T6: references coded in context from what a wrapper of the coder sees | 2.5% of the references at best, about 0.4% of the file |
+| T7: levels under richer contexts, as binary choices, or with another seed and step | No context beat T3's; 0.6% of the levels at best |
+| T9: each new map coded under what the most alike known map says for the cell | Cell flags 0.4% fewer; levels worse |
+| T10: the kind flags, moves and exception moves under more context | 968 bits together, 0.5% of the file |
+
 **Two lessons about method:**
 - **A 32-position sample can't project the whole game.** Its bootstrap 95% high fell below the true mean 11% of the
   time; the frontier's tail is too heavy (h272, h276).
@@ -252,7 +277,9 @@ if new.
 
 ---
 
-## 6. Open
+## 6. Each step after G3, as measured
+
+One entry per step, oldest first. What is still open is in §7.
 
 - **R2, measured (closed):** the builder priced each map reference at the index's full width (10 bits a leaf with
   G1's 767-map lists), while the judges code references by first_use, where a repeated map costs 1–3 bits. Rebuilding
@@ -400,12 +427,62 @@ if new.
   cell to the left, or three or more cells below did worse. Written with it, Z2's game reads back to T3's game with 0
   differences and every line wins, over 3,372 leaves (h389), in 112,644 bits, under the bar of 99/100 of 115,599 (h390).
   Only the flags change, 30,949 to 27,995 bits, 9.5% fewer, near G3's 9.9% (h391, after the data).
-- **Picking pieces by their file cost (P1, not built):** In scratch, U2's search priced by the coder's counts on T2's
-  file held fixed moved 18 of 819 positions, for a gain inside that stand-in's own error; it was dropped.
+- **The exception flags coded in context (T5, measured):** A leaf's walk asks at each of its own positions with a
+  choice whether the rule is overruled; on G3's file 3,157 of 1,895,096 flags were. Exceptions come together: once a
+  line leaves the rule it meets more. Of 65 contexts simulated on G3's file, how many exceptions the walk had read, up
+  to two, and how many flags since the last one, on a log scale, coded G3's exception flags in 27,285 bits against
+  33,698; the level of the rule's move, the safe moves or the stones did less. Written with it, Z2's game reads back
+  to T4's game with 0 differences and every line wins, over 3,372 leaves (h392), in 109,034 bits, under the bar of
+  99/100 of 112,644 (h393). Only the exception flags change, 17,884 to 14,273 bits, 20.2% fewer, near G3's 19.0%
+  (h394, after the data).
+- **Reading the position (T8, measured):** On G3's file, ranking the known maps by board likeness took the references
+  from 28,842 bits to 24,779, and the plies below the leaf took the exception flags from 27,285 to 26,306. Written by
+  that walk, Z2's game reads back to T5's game with 0 differences and every line wins, over 3,372 leaves (h395), in
+  106,044 bits, under the bar of 99/100 of 109,034 (h396). Only those two parts change: the references 15,775 to
+  13,331 bits, 15.5% fewer, the exception flags 14,273 to 13,728, 3.8% fewer, near G3's 14.1% and 3.6% (h397, after the
+  data).
+
+---
+
+## 7. Open
+
+The file's code looks near its floor for this game: the last four coding studies each found under 1% of the file
+(§5). A smaller file now needs a smaller game or a different language. Nothing in this section has been measured.
+
+- **Finding it without a solver.** This comes first. The verifying walk is a proof that needs no solver, so a process
+  can prove positions from the bottom up and use each proof in place of the solver above it. Whether the builder can
+  find maps this way, and how much larger the result is, has not been measured.
+
+- **Where the gap to WeakC4 lies (scratch, never proven).** Written through T8's coder under its own rule setting
+  ("exact" ties, ten levels), WeakC4's game takes 39,728 bits against our 106,044; the count had priced it at 123,881.
+  Of the gap, 57% is maps (385 against 1,008), 25% exceptions (45 against 1,625) and 4% the tree's own bits. Under our
+  setting ("lowest" ties) 247 of its 385 diagrams cannot be written. WeakC4 stays a yardstick; nothing of it is used.
+- **Fewer, earlier leaves.** The game has 680 moves and 3,372 leaves; WeakC4 has 251 and 1,009 (Y1, §6). Maps are 67% of
+  the file, at 71 bits a map, and a leaf that moves up the tree removes the maps below it. The levers are generic: an
+  opening chosen together with its maps, and builds started above ply 6.
+- **Builds priced by the file.** Every map was searched for, and every piece chosen, against the count. T2 showed that
+  the levels the searches keep are not the cheapest. A search that scores a map by what it costs in the file has not
+  been tried; P1's stand-in covered only the choice among pieces already built.
+- **Another library pass.** Z2, the last, gained 1.4%, and each pass has gained less than the one before.
+- **A second game.** The process is meant to be generic. It has been run on one game.
+- **Decoding time.** T8's decoder ranks every known map at every leaf, so writing the file and reading it back takes
+  51 minutes against T5's 14. This costs time, not bits.
 
 ---
 
 ## Reproduction
+
+Each file's evidence is in `examples/boardgames/evidence/`. The replay of every line is the run's, recorded in that
+file.
+
+| Step | Evidence | Written and played by | Proof test, and what it does |
+|---|---|---|---|
+| T1 | `c49_t1.json.gz` | `scripts/c4_strategy_file.py` | `tests/test_c49_t1_evidence.py`: decodes the file from its bytes, assembles the game again, compares the two and encodes the game back to the same bytes |
+| T2 | `c49_t2.json.gz` | `scripts/c4_map_orders.py` | `tests/test_c49_t2_evidence.py`: decodes T1's file, rebuilds the maps from the orders stored in T2's, encodes the game to the same bytes and decodes them back to it |
+| T3 | `c49_t3.json.gz` | `scripts/c4_level_context.py` | `tests/test_c49_t3_evidence.py`: decodes T2's file, writes its game with `harness/level_context.py` to the same bytes and decodes them back to T2's game |
+| T4 | `c49_t4.json.gz` | `scripts/c4_cell_context.py` | `tests/test_c49_t4_evidence.py`: the same from T3's file with `harness/cell_context.py` |
+| T5 | `c49_t5.json.gz` | `scripts/c4_exception_context.py` | `tests/test_c49_t5_evidence.py`: the same from T4's file with `harness/exception_context.py` |
+| T8 | `c49_t8.json.gz` | `scripts/c4_position_walk.py` | `tests/test_c49_t8_evidence.py`: the same from T5's file with `harness/position_walk.py` |
 
 From `examples/boardgames/`:
 
