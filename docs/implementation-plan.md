@@ -838,9 +838,14 @@ rule standalone and in decision-list order, by ply.
   - **Where the calls go (user's choice, 2026-11-10), done:** at 65 of 66 unproved positions the first root move
     took 3,999 of 4,000 calls; 160K sub-positions refuted against 109K proved. The search order is the limit.
   - **Best-first proving (user's choice, 2026-11-11), built:** `harness/best_first.py`, proof-number search with
-    maps as proofs of whole subtrees; exact on tic-tac-toe, every proof checked. Pilot 7 running: 4,000 positions
-    evaluated each on the 82 positions (depth first at the same work: 16, 17 composed). Then: the same search with
-    no maps, to measure how much the maps cut the search.
+    maps as proofs of whole subtrees; exact on tic-tac-toe, every proof checked. Pilot 7 (scratch): at 4,000
+    positions evaluated, 40 of 45 with a known map (depth first 17 of 46) and 14 of 29 whose map has exceptions
+    (before: 0), 14 of 18 at 8–12 stones, all 54 checked; 8 positions hit the hour ceiling and are left out.
+    With no maps (plain proof-number search): 8 of 46 and 0 of 36; where both proved, maps used 59 times fewer
+    evaluations and proofs 7.5 times smaller. Neither half works alone.
+  - **BF1, registered 2026-11-11 and running:** `harness/floor_bf1.py`, `scripts/c4_best_first.py`; T8's leaf positions,
+    8 per stone count 8–22 and kind; h398 (best first with maps ≥ 2× depth first with maps), h399 (≥ 2× best first
+    with no maps), h400 (every proof holds; the solver grades afterwards). Run log `checkpoints/runs/c49_bf1.log`.
   - **Next (proposed, not decided): maps patched by proofs.** Keep a map that fails at only a few positions, and
     prove the positions on its failing lines where the rule has a choice, each with its own node, so the composed
     strategy wins. The solver-free form of the exceptions the oracle-assisted builder used.

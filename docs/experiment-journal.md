@@ -6635,3 +6635,31 @@ position proved by a move, the measure of what the maps save; it is exact on tic
 composition, and on the 5-expansion fixture X{6} O{3} it needs more expansions than with maps. 15 tests; 29/29
 mutants after three gaps were closed (the empty map on a position over the bound, its proof stored, and a move that
 wins at once, which the leaf step always caught first when maps were on).
+
+Solver-free pilot 7, best first, 2026-11-11 (scratch, never proven). Pilot 5's 82 positions, 4,000 positions
+evaluated each, composition on, 50 trials a search, bound 5,000; 8 positions reached the 3,600-second ceiling and
+are left out (1 with a known map, 7 whose G3 map has exceptions). Best first proved 40 of the 45 with a known map (5,
+4, 5, 5, 6, 5, 6, 4 at 8 to 22 stones) against depth first's 17 of 46 at the same work, and 14 of the 29 whose G3 map
+has exceptions, against none at any budget before. All 54 proofs passed `composed.check`; nothing was refuted. The
+proofs hold 1 to 247 nodes; a proved position needed a median of 1,120 evaluations. A position took a median 238
+seconds against 33: best first runs the leaf step at shallower positions, where walks are long, under a load
+average that stayed high. The first solver-free proofs at 8 to 12 stones: 14 of 18, where the October search
+(h166) and every pilot since found none. The same search with no maps was launched next.
+
+Best first with no maps, 2026-11-11 (scratch, never proven). The same 82 positions and work with `maps=False`, plain
+proof-number search; no position reached the ceiling. It proved 8 of the 46 with a known map (0, 1, 0, 1, 2, 1, 0, 3
+at 8 to 22 stones) and none of the 36, against best first with maps' 40 of 45 and 14 of 29, and depth first with
+maps' 17 and 0. On the 74 positions both best-first runs judged, maps proved 46 that no maps could not and no maps
+none that maps could not. Where both proved a position (8), maps needed 262 positions evaluated against 15,516, 59
+times fewer, and their proofs held 47 nodes against 352. Every proof in all three runs passed `composed.check`.
+Neither half works alone: the maps with a poor order reach 17, the order with no maps 8, the two together 54.
+
+BF1 registered and launched, 2026-11-11 (the user's choice: as proposed). `harness/floor_bf1.py` (the judge, 8 tests,
+22/22 mutants), `scripts/c4_best_first.py`, `tests/test_c49_bf1_evidence.py`, which rebuilds every stored proof from
+the evidence and plays it with `composed.check` instead of taking the run's word. The sample: T8's leaf positions
+(Z2's game, which no pilot used), 8 for each count of stones 8 to 22 and each kind (a map with or without
+exceptions), the empty map's leaves left out; three arms with the same work (4,000 positions evaluated, 50 trials a
+search, bound 5,000, 8 recent maps, composition on); a position any arm cuts short at 3,600 seconds is reported and
+not counted, and at least 60 must be counted. Pre-registered: h398 (best first with maps proves at least twice as
+many as depth first with maps; refuted at 1.2 times or fewer), h399 (the same against best first with no maps), h400
+(every proof holds, and the solver, as a grader only and afterwards, finds every proved position won).

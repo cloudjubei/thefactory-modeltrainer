@@ -11842,6 +11842,81 @@
         "harness/floor_t8.py": "45d12c27d2d391b4b1bfbd1ff9968e471b38199ccb8d1ca76c5c2b56d201ea5c",
         "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f"
       }
+    },
+    "h398": {
+      "id": "h398",
+      "claim": "\u00a73.7 BF1: on harness.floor_bf1's sample of T8's leaf positions (8 for each count of stones 8 to 22 and each kind, with or without exceptions; positions any arm cut short at 3,600 seconds left out, at least 60 counted), best-first proving with maps (harness.best_first, composition on) proves at least twice as many as depth-first proving with maps (harness.self_proof) with the same work: 4,000 positions evaluated, 50 trials a map search, the bound 5,000. Refuted at 1.2 times as many or fewer; inconclusive between.",
+      "mode": "test",
+      "proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_best_first_with_maps_proves_twice_as_many_as_depth_first",
+      "note": "Seen before registering (scratch, never proven): pilots on 82 leaf positions of G3's game (pilot 2's sample) at 4,000 positions evaluated each: best-first with maps proved 40 of 45 with a known map and 14 of 29 whose map has exceptions (8 positions hit the hour ceiling); depth-first with maps 17 of 46 and 0 of 36; best-first with no maps 8 of 46 and 0 of 36; every proof passed composed.check. The registered sample is drawn from T8's game (Z2's), which no pilot used. No arm reads a solver; the solver's values are taken afterwards as a grader.",
+      "registered_at": "2026-11-11T08:25:11.518724+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_bf1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "harness/floor_bf1.py": "cea80a05c3b241f5a60f47b1cdf3469e15ffc985e5ac9b5ad4508cd6914e5fdc",
+        "tests/test_c49_bf1_evidence.py": "841cbe1c65d334459ccc3a3a6a09a5bf42283f1ab7c75ec9a275070d76fb81b6",
+        "harness/best_first.py": "7847278d95f7e6556d40c4365e4b03bf41cb2c78e2dc00ecebfd252475c0bc5c",
+        "harness/self_proof.py": "52fb09c060ed1f3dcbcd38e810c6095c0f205ca4c894dc3a301a498aa28ce8ac",
+        "harness/composed.py": "c969f909036413c7519b68a300f59af4460812d4b60ae854cb34584d59e96ec4",
+        "scripts/c4_best_first.py": "9f8d68e930c1e9f87dab8c65648a4f4681257db9e72154ce92efea814fa93069",
+        "harness/steady_state.py": "03e7c6e968bd7f7fe00c836a307b4794f71c7438e6b14e635aa35bf32e093c01",
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39"
+      },
+      "inconclusive_proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_best_vs_depth_is_undecidable"
+    },
+    "h399": {
+      "id": "h399",
+      "claim": "\u00a73.7 BF1: on the same sample and work, best-first proving with maps proves at least twice as many of the counted positions as the same best-first search with no maps (plain proof-number search, every position proved by a move). Refuted at 1.2 times as many or fewer; inconclusive between.",
+      "mode": "test",
+      "proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_best_first_with_maps_proves_twice_as_many_as_with_no_maps",
+      "note": "Seen before registering (scratch, never proven): pilots on 82 leaf positions of G3's game (pilot 2's sample) at 4,000 positions evaluated each: best-first with maps proved 40 of 45 with a known map and 14 of 29 whose map has exceptions (8 positions hit the hour ceiling); depth-first with maps 17 of 46 and 0 of 36; best-first with no maps 8 of 46 and 0 of 36; every proof passed composed.check. The registered sample is drawn from T8's game (Z2's), which no pilot used. No arm reads a solver; the solver's values are taken afterwards as a grader.",
+      "registered_at": "2026-11-11T08:25:24.774304+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_bf1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "harness/floor_bf1.py": "cea80a05c3b241f5a60f47b1cdf3469e15ffc985e5ac9b5ad4508cd6914e5fdc",
+        "tests/test_c49_bf1_evidence.py": "841cbe1c65d334459ccc3a3a6a09a5bf42283f1ab7c75ec9a275070d76fb81b6",
+        "harness/best_first.py": "7847278d95f7e6556d40c4365e4b03bf41cb2c78e2dc00ecebfd252475c0bc5c",
+        "harness/self_proof.py": "52fb09c060ed1f3dcbcd38e810c6095c0f205ca4c894dc3a301a498aa28ce8ac",
+        "harness/composed.py": "c969f909036413c7519b68a300f59af4460812d4b60ae854cb34584d59e96ec4",
+        "scripts/c4_best_first.py": "9f8d68e930c1e9f87dab8c65648a4f4681257db9e72154ce92efea814fa93069",
+        "harness/steady_state.py": "03e7c6e968bd7f7fe00c836a307b4794f71c7438e6b14e635aa35bf32e093c01",
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39"
+      },
+      "inconclusive_proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_best_vs_nomaps_is_undecidable"
+    },
+    "h400": {
+      "id": "h400",
+      "claim": "\u00a73.7 BF1: every proof any of the three arms gives, counted or not, holds: rebuilt from the evidence and played against every reply by harness.composed's check it wins every line, and the solver, used afterwards as a grader only, finds every proved position won. Refuted by any proof that fails either.",
+      "mode": "test",
+      "proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_every_proof_holds",
+      "note": "Seen before registering (scratch, never proven): pilots on 82 leaf positions of G3's game (pilot 2's sample) at 4,000 positions evaluated each: best-first with maps proved 40 of 45 with a known map and 14 of 29 whose map has exceptions (8 positions hit the hour ceiling); depth-first with maps 17 of 46 and 0 of 36; best-first with no maps 8 of 46 and 0 of 36; every proof passed composed.check. The registered sample is drawn from T8's game (Z2's), which no pilot used. No arm reads a solver; the solver's values are taken afterwards as a grader.",
+      "registered_at": "2026-11-11T08:25:25.197053+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_bf1.json.gz",
+        "started": null
+      },
+      "pins": {
+        "harness/floor_bf1.py": "cea80a05c3b241f5a60f47b1cdf3469e15ffc985e5ac9b5ad4508cd6914e5fdc",
+        "tests/test_c49_bf1_evidence.py": "841cbe1c65d334459ccc3a3a6a09a5bf42283f1ab7c75ec9a275070d76fb81b6",
+        "harness/best_first.py": "7847278d95f7e6556d40c4365e4b03bf41cb2c78e2dc00ecebfd252475c0bc5c",
+        "harness/self_proof.py": "52fb09c060ed1f3dcbcd38e810c6095c0f205ca4c894dc3a301a498aa28ce8ac",
+        "harness/composed.py": "c969f909036413c7519b68a300f59af4460812d4b60ae854cb34584d59e96ec4",
+        "scripts/c4_best_first.py": "9f8d68e930c1e9f87dab8c65648a4f4681257db9e72154ce92efea814fa93069",
+        "harness/steady_state.py": "03e7c6e968bd7f7fe00c836a307b4794f71c7438e6b14e635aa35bf32e093c01",
+        "harness/position_walk.py": "c27bf8a563631c13b2036aebb0445e6c348c02186e9569726c2d113e68fd942f",
+        "harness/strategy_file.py": "77391b8dc0beac70db25bce173b3351fbcb33077b5e33216f0c1fda13c084a39"
+      },
+      "inconclusive_proof": "tests/test_c49_bf1_evidence.py::test_c49_bf1_soundness_is_undecidable"
     }
   }
 }

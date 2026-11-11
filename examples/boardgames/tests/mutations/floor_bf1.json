@@ -1,0 +1,168 @@
+{
+  "file": "harness/floor_bf1.py",
+  "tests": ["tests/test_floor_bf1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "support needs no gain",
+      "old": "    if treated > control and treated >= spec[\"support\"] * control:",
+      "new": "    if treated >= spec[\"support\"] * control:"
+    },
+    {
+      "name": "support bar exclusive",
+      "old": "treated >= spec[\"support\"] * control:",
+      "new": "treated > spec[\"support\"] * control:"
+    },
+    {
+      "name": "refute bar exclusive",
+      "old": "    if treated <= spec[\"refute\"] * control:",
+      "new": "    if treated < spec[\"refute\"] * control:"
+    },
+    {
+      "name": "refute bar is support",
+      "old": "    if treated <= spec[\"refute\"] * control:",
+      "new": "    if treated < spec[\"support\"] * control:"
+    },
+    {
+      "name": "spec not checked",
+      "old": "    if (e.get(\"spec\") != \"harness.floor_bf1\" or e.get(\"settings\") != settings(spec)",
+      "new": "    if (e.get(\"settings\") != settings(spec)"
+    },
+    {
+      "name": "settings not checked",
+      "old": "e.get(\"spec\") != \"harness.floor_bf1\" or e.get(\"settings\") != settings(spec)\n",
+      "new": "e.get(\"spec\") != \"harness.floor_bf1\"\n"
+    },
+    {
+      "name": "source not checked",
+      "old": "\n            or e.get(\"source_sha256\") != source.get(\"sha256\")):",
+      "new": "):"
+    },
+    {
+      "name": "cut-short positions counted",
+      "old": "    counted = [r for r in rows if not any(r[\"arms\"][arm][\"ceiling\"] for arm in ARMS)]",
+      "new": "    counted = list(rows)"
+    },
+    {
+      "name": "only the best arm's cut counted",
+      "old": "not any(r[\"arms\"][arm][\"ceiling\"] for arm in ARMS)",
+      "new": "not r[\"arms\"][\"best\"][\"ceiling\"]"
+    },
+    {
+      "name": "unknown counted as proved",
+      "old": "proved = {arm: sum(r[\"arms\"][arm][\"result\"] is True for r in counted)",
+      "new": "proved = {arm: sum(r[\"arms\"][arm][\"result\"] is not False for r in counted)"
+    },
+    {
+      "name": "minimum ignored",
+      "old": "    enough = len(counted) >= spec[\"min_positions\"]",
+      "new": "    enough = True"
+    },
+    {
+      "name": "minimum exclusive",
+      "old": "    enough = len(counted) >= spec[\"min_positions\"]",
+      "new": "    enough = len(counted) > spec[\"min_positions\"]"
+    },
+    {
+      "name": "proofs only of counted positions",
+      "old": "proofs = [(r, arm) for r in rows for arm in ARMS",
+      "new": "proofs = [(r, arm) for r in counted for arm in ARMS"
+    },
+    {
+      "name": "re-check ignored",
+      "old": "all(check(r, arm) and r[\"value\"] > 0 for r, arm in proofs)",
+      "new": "all(r[\"value\"] > 0 for r, arm in proofs)"
+    },
+    {
+      "name": "grader ignored",
+      "old": "all(check(r, arm) and r[\"value\"] > 0 for r, arm in proofs)",
+      "new": "all(check(r, arm) for r, arm in proofs)"
+    },
+    {
+      "name": "no proof counts as sound",
+      "old": "sound = (\"inconclusive\" if not proofs",
+      "new": "sound = (\"supported\" if not proofs"
+    },
+    {
+      "name": "against the wrong arm",
+      "old": "\"best_vs_nomaps\": verdict(proved[\"best\"], proved[\"nomaps\"], spec)",
+      "new": "\"best_vs_nomaps\": verdict(proved[\"best\"], proved[\"depth\"], spec)"
+    },
+    {
+      "name": "ceiling not in the settings",
+      "old": "SETTINGS = (\"rule\", \"source\", \"stones\", \"per\", \"seed\", \"evaluations\", \"trials\", \"bound\", \"reuse\", \"cap\", \"ceiling\")",
+      "new": "SETTINGS = (\"rule\", \"source\", \"stones\", \"per\", \"seed\", \"trials\", \"bound\", \"reuse\", \"cap\", \"ceiling\")"
+    },
+    {
+      "name": "other support bar",
+      "old": "\"support\": 2.0, \"refute\": 1.2,",
+      "new": "\"support\": 1.5, \"refute\": 1.2,"
+    },
+    {
+      "name": "other refute bar",
+      "old": "\"refute\": 1.2,",
+      "new": "\"refute\": 1.0,"
+    },
+    {
+      "name": "other evaluations",
+      "old": "\"evaluations\": 4000,",
+      "new": "\"evaluations\": 400,"
+    },
+    {
+      "name": "other minimum",
+      "old": "\"min_positions\": 60}",
+      "new": "\"min_positions\": 6}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-11-11T08:24:59+00:00",
+    "killed": 22,
+    "survived": [],
+    "killed_by": {
+      "support needs no gain": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths"
+      ],
+      "support bar exclusive": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths"
+      ],
+      "refute bar exclusive": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths"
+      ],
+      "refute bar is support": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths",
+        "test_a_small_gain_refutes_and_a_middle_one_is_inconclusive"
+      ],
+      "spec not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "settings not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "source not checked": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "cut-short positions counted": ["test_the_counts_are_over_the_positions_no_arm_cut_short"],
+      "only the best arm's cut counted": [
+        "test_the_counts_are_over_the_positions_no_arm_cut_short"
+      ],
+      "unknown counted as proved": ["test_the_counts_are_over_the_positions_no_arm_cut_short"],
+      "minimum ignored": ["test_too_few_positions_is_inconclusive"],
+      "minimum exclusive": ["test_too_few_positions_is_inconclusive"],
+      "proofs only of counted positions": [
+        "test_every_proof_must_check_and_be_a_win_by_the_grader"
+      ],
+      "re-check ignored": ["test_every_proof_must_check_and_be_a_win_by_the_grader"],
+      "grader ignored": ["test_every_proof_must_check_and_be_a_win_by_the_grader"],
+      "no proof counts as sound": ["test_soundness_with_no_proof_at_all_is_inconclusive"],
+      "against the wrong arm": ["test_a_small_gain_refutes_and_a_middle_one_is_inconclusive"],
+      "ceiling not in the settings": ["test_a_run_off_its_spec_or_its_source_is_not_run"],
+      "other support bar": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths",
+        "test_the_spec_reads_t8_s_game_under_its_rule_with_the_pilots_settings"
+      ],
+      "other refute bar": [
+        "test_a_ratio_is_supported_at_twice_the_control_and_refuted_at_six_fifths",
+        "test_the_spec_reads_t8_s_game_under_its_rule_with_the_pilots_settings"
+      ],
+      "other evaluations": [
+        "test_a_run_off_its_spec_or_its_source_is_not_run",
+        "test_the_spec_reads_t8_s_game_under_its_rule_with_the_pilots_settings"
+      ],
+      "other minimum": ["test_the_spec_reads_t8_s_game_under_its_rule_with_the_pilots_settings"]
+    }
+  }
+}
